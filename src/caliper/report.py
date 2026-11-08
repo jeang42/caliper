@@ -735,6 +735,19 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "- Engine-reported durations and client-observed latency are measured "
         "differently and are not interchangeable."
     )
+    add(
+        "- Prompt throughput is measured only on attempts where the prompt was "
+        "genuinely evaluated; a repeated identical prompt hits the engine's prompt "
+        "cache and is excluded. The exclusion catches cache hits on long prompts, "
+        "where the reported rate becomes physically impossible; a cache hit on a "
+        "short prompt stays under the plausibility ceiling and widens the spread "
+        "instead."
+    )
+    add(
+        "- Repeated attempts at temperature 0 with a fixed seed were observed on "
+        "this engine to produce different output lengths for the same prompt, so "
+        "the sampling controls reduce run-to-run variation without removing it."
+    )
     if run["dry_run"]:
         add("- This was a dry run against the mock backend: no model was executed.")
     add("")
