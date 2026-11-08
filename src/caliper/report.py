@@ -89,6 +89,7 @@ class CategoryScore:
     skipped: int
     errors: int
     grading_errors: int
+    no_output: int
     tasks: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -100,6 +101,7 @@ class CategoryScore:
             "skipped": self.skipped,
             "errors": self.errors,
             "grading_errors": self.grading_errors,
+            "no_output": self.no_output,
             "tasks": self.tasks,
         }
 
@@ -129,9 +131,12 @@ class ModelSummary:
     prompt_tokens: Stat = field(default_factory=Stat)
     cold_load_s: Stat = field(default_factory=Stat)
     cold_load_gpu_mem_mib: Stat = field(default_factory=Stat)
+    reload_s: Stat = field(default_factory=Stat)
+    reloads: int = 0
     attempts: int = 0
     errors: int = 0
     truncated: int = 0
+    no_output: int = 0
     prompt_cache_hits: int = 0
 
     @property
@@ -158,6 +163,8 @@ class ModelSummary:
             "attempts": self.attempts,
             "errors": self.errors,
             "truncated": self.truncated,
+            "no_output": self.no_output,
+            "reloads": self.reloads,
             "prompt_cache_hits": self.prompt_cache_hits,
             "reliability": self.reliability,
             "categories": {k: v.to_dict() for k, v in self.categories.items()},
@@ -169,6 +176,7 @@ class ModelSummary:
                 "model_load_s": self.load_s.to_dict(),
                 "cold_load_s": self.cold_load_s.to_dict(),
                 "cold_load_gpu_mem_mib": self.cold_load_gpu_mem_mib.to_dict(),
+                "reload_s": self.reload_s.to_dict(),
                 "prompt_tokens": self.prompt_tokens.to_dict(),
             },
             "telemetry": {
@@ -404,6 +412,19 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
         summary.errors = sum(1 for a in attempts if not a["ok"])
         ok_attempts = [a for a in attempts if a["ok"]]
 
+        # Cold load is the warmup attempt that first brought the model in.
+        cold = [a for a in cold_by_model.get(model, []) if a["is_warmup"]]
+        summary.cold_load_s = stat(a["engine_load_duration_s"] for a in cold)
+        summary.cold_load_gpu_mem_mib = stat(
+            (_loads(a["telemetry_json"]) or {}).get("gpu_mem_delta_peak_mib") for a in cold
+        )
+        # A measured attempt that also paid a load is a reload: the engine
+        # evicted and re-admitted the model mid-run. Changing num_ctx between
+        # tasks forces this, and so does memory pressure.
+        reloaded = [a for a in cold_by_model.get(model, []) if not a["is_warmup"]]
+        summary.reloads = len(reloaded)
+        summary.reload_s = stat(a["engine_load_duration_s"] for a in reloaded)
+
         summary.output_tps = stat(a["output_tokens_per_s"] for a in ok_attempts)
         # Prompt throughput is only meaningful when the prompt was actually
         # evaluated. See PROMPT_RATE_PLAUSIBILITY_CEILING.
@@ -415,22 +436,22 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
         ]
         summary.prompt_cache_hits = len(ok_attempts) - len(cold_prompt)
         summary.prompt_tps = stat(a["prompt_tokens_per_s"] for a in cold_prompt)
-        summary.ttft_s = stat(a["ttft_s"] for a in ok_attempts)
-        summary.latency_s = stat(a["total_latency_s"] for a in ok_attempts)
+        # A request that had to load the model is not a steady-state request:
+        # its latency is dominated by loading, which is reported on its own.
+        reload_ids = {a["id"] for a in reloaded}
+        steady = [a for a in ok_attempts if a["id"] not in reload_ids]
+        summary.ttft_s = stat(a["ttft_s"] for a in steady)
+        summary.latency_s = stat(a["total_latency_s"] for a in steady)
         summary.prompt_tokens = stat(a["prompt_tokens"] for a in ok_attempts)
         # Model load time only means something when a load actually happened.
         summary.load_s = stat(
             a["engine_load_duration_s"]
             for a in ok_attempts
-            if a["engine_load_duration_s"] and a["engine_load_duration_s"] > 0.01
+            if a["engine_load_duration_s"] is not None and a["id"] not in reload_ids
         )
 
-        cold = cold_by_model.get(model, [])
-        summary.cold_load_s = stat(a["engine_load_duration_s"] for a in cold)
-        summary.cold_load_gpu_mem_mib = stat(
-            (_loads(a["telemetry_json"]) or {}).get("gpu_mem_delta_peak_mib") for a in cold
-        )
         summary.truncated = sum(1 for a in attempts if a["truncated"])
+        summary.no_output = sum(1 for a in attempts if a["graded"] == "no_output")
 
         telemetry = [_loads(a["telemetry_json"]) or {} for a in attempts]
         summary.gpu_mem_peak_mib = stat(t.get("gpu_mem_used_peak_mib") for t in telemetry)
@@ -456,6 +477,7 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
                 skipped=sum(1 for a in cat_attempts if a["graded"] == "skipped"),
                 errors=sum(1 for a in cat_attempts if not a["ok"]),
                 grading_errors=sum(1 for a in cat_attempts if a["graded"] == "error"),
+                no_output=sum(1 for a in cat_attempts if a["graded"] == "no_output"),
                 tasks=len({a["task_id"] for a in cat_attempts}),
             )
         summaries.append(summary)
@@ -551,8 +573,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
     )
     add("")
     cats = sorted({c for s in summaries for c in s.categories})
-    add("| Model | " + " | ".join(cats) + " | pending manual | skipped | grading errors |")
-    add("|---" * (len(cats) + 4) + "|")
+    add(
+        "| Model | "
+        + " | ".join(cats)
+        + " | pending manual | no output | skipped | grading errors |"
+    )
+    add("|---" * (len(cats) + 5) + "|")
     for s in summaries:
         cells = []
         for cat in cats:
@@ -564,10 +590,20 @@ def render_markdown(summary: dict[str, Any]) -> str:
         pending = sum(c.pending_manual for c in s.categories.values())
         skipped = sum(c.skipped for c in s.categories.values())
         grading_errors = sum(c.grading_errors for c in s.categories.values())
+        no_output = sum(c.no_output for c in s.categories.values())
         add(
             f"| `{s.model}` | "
             + " | ".join(cells)
-            + f" | {pending} | {skipped} | {grading_errors} |"
+            + f" | {pending} | {no_output} | {skipped} | {grading_errors} |"
+        )
+    if any(s.no_output for s in summaries):
+        add("")
+        add(
+            "> *No output* counts attempts at a manually graded task where the "
+            "model emitted nothing to grade. They are kept out of the automatic "
+            "means so that every model's category score covers the same set of "
+            "tasks, and they are a failure in their own right: see the truncation "
+            "and reload columns below."
         )
     if any(c.grading_errors for s in summaries for c in s.categories.values()):
         add("")
@@ -637,13 +673,24 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "load time is what a request pays once the model is already resident."
     )
     add("")
-    add("| Model | cold load s | weights loaded to GPU | warm load s |")
-    add("|---|---|---|---|")
+    add("| Model | cold load s | weights loaded to GPU | warm load s | reloads | reload cost s |")
+    add("|---|---|---|---|---|---|")
     for s in summaries:
+        reloads = f"{s.reloads}/{s.attempts}" if s.attempts else "n/a"
         add(
             f"| `{s.model}` | {s.cold_load_s.fmt(2)} | "
-            f"{s.cold_load_gpu_mem_mib.fmt(0, ' MiB')} | {s.load_s.fmt(3)} |"
+            f"{s.cold_load_gpu_mem_mib.fmt(0, ' MiB')} | {s.load_s.fmt(3)} | "
+            f"{reloads} | {s.reload_s.fmt(1)} |"
         )
+    add("")
+    add(
+        "A *reload* is a measured attempt that had to bring the model back in "
+        "because the engine had evicted it. Changing `num_ctx` between tasks "
+        "forces one, and so does memory pressure on a model that only just "
+        "fits. Reload attempts are excluded from the TTFT and latency figures "
+        "above, because their cost is loading rather than inference; the "
+        "reload cost is reported here instead."
+    )
     add("")
 
     add("## Memory and residency")

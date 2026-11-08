@@ -26,6 +26,12 @@ Validator = Callable[[dict[str, Any], GenerationResult], TaskScore]
 
 _REGISTRY: dict[str, Validator] = {}
 
+#: Validator kinds whose scores come from a human, not from code. An empty
+#: response to one of these is recorded as ``graded="no_output"`` rather than
+#: scored zero, so that automatic category means stay over the same set of
+#: tasks for every model being compared.
+MANUAL_KINDS = frozenset({"rubric"})
+
 CODE_FENCE = re.compile(r"```(?:[A-Za-z0-9_+-]*)\n(.*?)```", re.DOTALL)
 
 
@@ -482,6 +488,18 @@ def grade(task_validator: dict[str, Any], result: GenerationResult) -> TaskScore
     if not result.ok:
         return TaskScore(
             0.0, passed=False, validator=kind, detail=f"generation failed: {result.error}"
+        )
+    if not result.has_visible_output and kind in MANUAL_KINDS:
+        # A rubric task carries no automatic score for any model, so scoring an
+        # empty response 0 here would put this attempt in the automatic mean
+        # while every other model's attempt at the same task stays out of it.
+        # The category mean would then cover a different task set per model.
+        # The failure is preserved as its own bucket and counted in the report.
+        detail = "no visible output; rubric task cannot be graded automatically"
+        if result.truncated:
+            detail += " (generation hit the token limit)"
+        return TaskScore(
+            score=None, passed=False, validator=kind, graded="no_output", detail=detail
         )
     if not result.has_visible_output:
         # Several validators (negative constraints, lookahead patterns) match

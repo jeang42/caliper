@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.2 — 2026-11-08
+
+Stage 3 comparison run (3 models, 228 attempts, 22 min, zero request
+failures). It exposed two defects that made the headline quality column
+unfair, plus a measurement artefact worth more than the run itself.
+
+- **Rubric tasks with no output no longer corrupt category means.** The
+  empty-output guard was scoring them 0 as if automatic, so a model that
+  failed to answer had those attempts inside the automatic mean while other
+  models' attempts at the same task stayed outside it — category means covered
+  a different task set per model. They now land in a `no_output` bucket that is
+  counted and reported separately. This moved `qwen3.5:35b` coding from a
+  misleading 0.35 to 0.44 over the same tasks as every other model.
+- **Model reloads were mislabelled as warm load time and were inflating
+  latency.** Changing `num_ctx` between tasks forces Ollama to evict and
+  reload: 2.9 s for `gpt-oss:20b`, 16.0 s for `qwen3.5:35b`. That cost sat
+  inside the affected attempt's latency, which is why `qwen3.5:35b` appeared
+  to have a 1.20 s TTFT. Reloads are now counted and costed in their own
+  columns and excluded from TTFT and latency, which are steady-state figures.
+  Corrected TTFT: 0.09, 0.09, 0.11 s.
+- **Tasks are now ordered so that all tasks sharing a context length run
+  consecutively**, reducing reloads to at most one per context group.
+- **New `caliper regrade`** re-scores a stored run with the current validators
+  and no inference, which is what storing every raw response was for. Applied
+  to stages 2 and 3: 6 attempts corrected, 219 reproduced identically, and no
+  measurement altered.
+- Warm load time is now reported as the measured ~0.002 s rather than "n/a".
+
 ## 0.1.1 — 2026-11-08
 
 First real measurements taken (stage 1 smoke test, `gpt-oss:20b`). The run

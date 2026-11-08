@@ -325,6 +325,20 @@ class Store:
         )
         return int(cur.lastrowid or 0)
 
+    def update_scores(self, updates: list[tuple]) -> None:
+        """Rewrite score columns for existing attempts.
+
+        Used by re-grading. Measurements are never touched, only the outcome
+        of applying a validator to an already stored response.
+        """
+        self._conn.executemany(
+            """UPDATE attempts
+                  SET score = ?, passed = ?, validator = ?, graded = ?,
+                      score_detail = ?, sub_scores_json = ?
+                WHERE id = ?""",
+            updates,
+        )
+
     def save_inventory(self, payload: dict[str, Any], hostname: str, engine: str) -> str:
         inv_id = new_id()
         self._conn.execute(

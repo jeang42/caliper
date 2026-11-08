@@ -22,6 +22,7 @@ from .evals.spec import CATEGORIES
 from .export import export_attempts_csv, export_run_json, export_summary_csv
 from .inventory import collect_inventory, render_report
 from .logging_setup import setup_logging
+from .regrade import regrade_run
 from .report import PROFILES, render_markdown, summarize_run
 from .runner import BenchmarkRunner, RunAborted, RunSettings, estimate_run_cost
 from .storage import Store
@@ -224,6 +225,26 @@ def cmd_report(args: argparse.Namespace, config: Config) -> int:
     return 0
 
 
+def cmd_regrade(args: argparse.Namespace, config: Config) -> int:
+    with _store(config) as store:
+        run_id = args.run or store.latest_run_id()
+        if run_id is None:
+            print("no runs stored yet", file=sys.stderr)
+            return 2
+        outcome = regrade_run(
+            store,
+            run_id,
+            allow_code_execution=args.allow_code_execution,
+            dry_run=args.dry_run,
+        )
+        print(outcome.summary_line())
+        if args.dry_run:
+            print("--dry-run: nothing was written")
+        for task_id in outcome.missing_tasks:
+            print(f"  skipped {task_id}: not in the installed suite", file=sys.stderr)
+    return 0
+
+
 def cmd_runs(args: argparse.Namespace, config: Config) -> int:
     with _store(config) as store:
         rows = store.list_runs(limit=args.limit)
@@ -375,6 +396,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--json", action="store_true")
     p_report.add_argument("-o", "--output", help="write to this path instead of stdout")
     p_report.set_defaults(func=cmd_report)
+
+    p_regrade = sub.add_parser(
+        "regrade",
+        help="re-score a stored run with the current validators (no inference)",
+    )
+    p_regrade.add_argument("--run", help="run id (default: most recent)")
+    p_regrade.add_argument("--allow-code-execution", action="store_true")
+    p_regrade.add_argument(
+        "--dry-run", action="store_true", help="report what would change without writing"
+    )
+    p_regrade.set_defaults(func=cmd_regrade)
 
     p_runs = sub.add_parser("runs", help="list stored runs")
     p_runs.add_argument("--limit", type=int, default=25)

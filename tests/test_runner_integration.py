@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import pytest
 
 from caliper import safety as safety_mod
@@ -360,3 +362,51 @@ def test_context_override_applies_to_every_task():
         context_length=16384,
     )
     assert build_options(settings, task)["num_ctx"] == 65536
+
+
+def test_tasks_are_ordered_so_context_length_changes_once(store):
+    """Changing num_ctx forces the engine to evict and reload the model, which
+    cost 14-20 s per switch on a 22 GiB model, so tasks sharing a context
+    length must run consecutively."""
+    suite = Suite(
+        name="ctx",
+        suite_version="1",
+        tasks=[
+            Task(
+                id=f"t.{i}",
+                category="coding",
+                title="t",
+                prompt=f"p{i}",
+                validator={"kind": "exact", "expected": "x"},
+                context_length=ctx,
+            )
+            for i, ctx in enumerate([8192, 16384, 8192, 16384, 8192])
+        ],
+    )
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0)
+    runner = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS)
+    ordered = [t.context_length for t in runner.select_tasks(suite)]
+    switches = sum(1 for a, b in pairwise(ordered) if a != b)
+    assert switches == 1, ordered
+    assert ordered == [8192, 8192, 8192, 16384, 16384]
+
+
+def test_task_ordering_is_stable_within_a_context_group(store):
+    suite = Suite(
+        name="ctx",
+        suite_version="1",
+        tasks=[
+            Task(
+                id=f"t.{i}",
+                category="coding",
+                title="t",
+                prompt="p",
+                validator={"kind": "exact", "expected": "x"},
+                context_length=8192,
+            )
+            for i in range(4)
+        ],
+    )
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0)
+    runner = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS)
+    assert [t.id for t in runner.select_tasks(suite)] == ["t.0", "t.1", "t.2", "t.3"]

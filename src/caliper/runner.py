@@ -151,6 +151,20 @@ class BenchmarkRunner:
             missing = wanted - {t.id for t in tasks}
             if missing:
                 raise KeyError(f"unknown task ids: {sorted(missing)}")
+        # Order tasks so that every task sharing a context length runs
+        # consecutively. Changing num_ctx forces the engine to evict and
+        # reload the model, which costs 3 s for a 13 GiB model and 14-20 s for
+        # a 22 GiB one, and lands that cost inside the first affected
+        # attempt's latency. Ordering is stable within a context group so runs
+        # stay comparable.
+        tasks = sorted(
+            tasks,
+            key=lambda t: (
+                self.settings.context_length_override
+                or t.context_length
+                or self.settings.context_length
+            ),
+        )
         if not self.settings.allow_code_execution:
             skipped = [t.id for t in tasks if t.requires_code_execution]
             if skipped:

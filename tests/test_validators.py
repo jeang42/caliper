@@ -273,3 +273,33 @@ def test_a_tool_call_counts_as_visible_output():
     assert result.has_visible_output is True
     score = validators.grade({"kind": "tool_call", "expected_function": "f"}, result)
     assert score.passed is True
+
+
+def test_rubric_with_no_output_is_not_scored_zero():
+    """Regression: an empty response to a rubric task used to be auto-scored 0,
+    which put it in the automatic category mean while other models' attempts at
+    the same task stayed out of it, so category means covered different task
+    sets per model."""
+    spec = {"kind": "rubric", "criteria": ["a", "b"]}
+    score = validators.grade(spec, res(""))
+    assert score.score is None
+    assert score.graded == "no_output"
+    assert score.passed is False
+    assert "cannot be graded automatically" in score.detail
+
+
+def test_rubric_with_no_output_notes_truncation():
+    result = GenerationResult(
+        model="m", engine="mock", text="", raw_final={"done_reason": "length"}
+    )
+    score = validators.grade({"kind": "rubric", "criteria": ["a"]}, result)
+    assert score.graded == "no_output"
+    assert "token limit" in score.detail
+
+
+def test_deterministic_validator_still_scores_empty_output_zero():
+    """Only manually graded tasks get the no_output bucket; a deterministic
+    task that was not answered is a plain failure."""
+    score = validators.grade({"kind": "exact", "expected": "x"}, res(""))
+    assert score.score == 0.0
+    assert score.graded == "automatic"

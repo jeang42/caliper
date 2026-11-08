@@ -235,7 +235,10 @@ def test_cold_load_comes_from_the_warmup_attempt(store):
     # The mock reports a 2 s load on the first (warmup) call and none after.
     assert perf["cold_load_s"]["n"] == 1
     assert perf["cold_load_s"]["mean"] == pytest.approx(2.0)
-    assert perf["model_load_s"]["n"] == 0
+    # Warm load is measured, not omitted: a resident model costs ~0 to "load".
+    assert perf["model_load_s"]["n"] == 3
+    assert perf["model_load_s"]["mean"] == pytest.approx(0.0)
+    assert summary["models"][0]["reloads"] == 0
     assert "cold versus warm" in render_markdown(summary)
 
 
