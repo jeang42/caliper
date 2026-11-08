@@ -18,7 +18,7 @@ import logging
 from typing import Any
 
 from . import __version__
-from .evals import load_suite
+from .evals import load_suite, longctx
 from .evals.validators import MANUAL_KINDS
 from .hardware import sample_gpus
 from .report import PROFILES, summarize_run
@@ -190,7 +190,13 @@ def get_attempt(store: Store, attempt_id: int) -> dict[str, Any]:
     ):
         data.pop(key, None)
 
-    task = _task_definition(run["suite"] if run else "v1", row["task_id"])
+    settings = (_loads(run["config_json"], {}) or {}).get("settings", {}) if run else {}
+    task = _task_definition(
+        run["suite"] if run else "v1",
+        row["task_id"],
+        seed=settings.get("seed"),
+        render=True,
+    )
     manual = store.manual_scores(row["run_id"]).get(attempt_id)
     return {
         "attempt": data,
@@ -209,14 +215,30 @@ def get_attempt(store: Store, attempt_id: int) -> dict[str, Any]:
     }
 
 
-def _task_definition(suite_name: str, task_id: str) -> dict[str, Any] | None:
-    """The task as the installed suite defines it, for grading context."""
+def _task_definition(
+    suite_name: str, task_id: str, seed: int | None = None, render: bool = False
+) -> dict[str, Any] | None:
+    """The task as the installed suite defines it, for grading context.
+
+    With ``render``, a long-context task also carries the document the model
+    actually saw, rebuilt from the run's seed. Rendered prompts are not stored
+    per attempt - at 8000 tokens each that would dominate the database - but
+    they are deterministic, so they can be reconstructed exactly. Without this
+    a reviewer looking at a wrong long-context answer sees only the
+    placeholder, which is the one thing the model did not see.
+    """
     try:
         suite = load_suite(suite_name or "v1")
         task = suite.get(task_id)
     except (KeyError, FileNotFoundError, ValueError):
         return None
+    rendered: str | None = None
+    if render and task.filler_tokens:
+        rendered, substituted = longctx.render(task.prompt, task.filler_tokens, seed=seed or 1234)
+        if not substituted:
+            rendered = None
     return {
+        "rendered_prompt": rendered,
         "id": task.id,
         "category": task.category,
         "title": task.title,

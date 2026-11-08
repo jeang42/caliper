@@ -1,0 +1,22 @@
+suite_version = "2.0.0"
+
+# v2 exists for one reason: in the five-model stage 3/4 comparison every model
+# scored 1.00 on every v1 long-context task, at every context length measured
+# in stage 5, including the case where 29% of the model was offloaded to system
+# RAM. A category where nothing separates the candidates carries no
+# information, so v1's three tasks are replaced here with eight harder ones.
+#
+# Everything else is inherited from v1 unchanged rather than copied, so a v2
+# run still reports all six categories and the other five stay directly
+# comparable to the v1 runs already stored. extends_version pins the base: if
+# v1 is ever edited, loading v2 fails and names the decision to be made,
+# instead of quietly changing what v2 measures while v2's own suite_version
+# stays at 2.0.0.
+extends = "v1"
+extends_version = "1.2.0"
+replaces = ["long_context"]
+description = """Suite v1 with a harder long-context category. The v1 tasks are
+single-needle retrieval in a 4-5k-token document; these require multi-hop
+chains, aggregation over the whole document, resolving superseded values,
+rejecting near-miss distractors, reporting an absent fact rather than inventing
+one, and reconstructing an order - in roughly twice the document."""

@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 from caliper.evals import load_suite
-from caliper.evals.longctx import PLACEHOLDER, make_filler, render
+from caliper.evals.longctx import INDEXED_PLACEHOLDER, PLACEHOLDER, make_filler, render
 from caliper.evals.spec import CATEGORIES
+
+#: Every installed suite. Suite-wide invariants are asserted for all of them,
+#: not just v1; v2 inherits most of its tasks, but its own files and its
+#: composition can break these just as easily.
+SUITES = ("v1", "v2")
+
+INDEX1 = "{{FILLER:1}}"
+INDEX2 = "{{FILLER:2}}"
+INDEX3 = "{{FILLER:3}}"
 
 
 def test_v1_suite_is_well_formed():
@@ -20,22 +30,25 @@ def test_v1_suite_is_well_formed():
         assert task.id.startswith(task.category.split("_")[0][:4]) or "." in task.id
 
 
-def test_task_ids_are_unique():
-    ids = [t.id for t in load_suite("v1").tasks]
+@pytest.mark.parametrize("name", SUITES)
+def test_task_ids_are_unique(name: str):
+    ids = [t.id for t in load_suite(name).tasks]
     assert len(ids) == len(set(ids))
 
 
-def test_tool_tasks_declare_tools():
-    for task in load_suite("v1").by_category(["tool_use"]):
+@pytest.mark.parametrize("name", SUITES)
+def test_tool_tasks_declare_tools(name: str):
+    for task in load_suite(name).by_category(["tool_use"]):
         if task.validator["kind"] == "tool_call":
             assert task.tools, task.id
 
 
-def test_long_context_tasks_use_the_filler_placeholder():
-    tasks = load_suite("v1").by_category(["long_context"])
+@pytest.mark.parametrize("name", SUITES)
+def test_long_context_tasks_use_the_filler_placeholder(name: str):
+    tasks = load_suite(name).by_category(["long_context"])
     assert tasks
     for task in tasks:
-        assert PLACEHOLDER in task.prompt
+        assert PLACEHOLDER in task.prompt or INDEXED_PLACEHOLDER.search(task.prompt), task.id
         assert task.filler_tokens
 
 
@@ -100,23 +113,69 @@ def test_render_leaves_plain_prompts_alone():
     assert out == "no filler here" and changed is False
 
 
-def test_every_regex_pattern_in_the_suite_compiles():
+def test_legacy_placeholder_repeats_identical_text():
+    """v1's prompts were measured with this behaviour, so it must not change.
+
+    Every ``{{FILLER}}`` site gets the same block, which is why a v1 document
+    with two filler blocks repeats itself and repeats its entry numbers. The
+    indexed form exists to avoid that; this one is frozen.
+    """
+    out, _ = render(f"A{PLACEHOLDER}B{PLACEHOLDER}C", 300)
+    first, second = out[1:].split("B", 1)
+    assert first == second[: -len("C")]
+
+
+def test_indexed_placeholders_get_distinct_text_and_continuous_numbering():
+    # The separator must be something the filler prose cannot contain; plain
+    # letters appear inside it and split the blocks in the wrong places.
+    sep = "\n=====\n"
+    out, changed = render(f"{INDEX1}{sep}{INDEX2}{sep}{INDEX3}", 900)
+    assert changed is True
+    assert not INDEXED_PLACEHOLDER.search(out)
+    blocks = out.split(sep)
+    assert len(blocks) == 3
+    assert len(set(blocks)) == 3, "each indexed segment must be different prose"
+    entries = [int(n) for n in re.findall(r"^Entry (\d{4})\.", out, re.MULTILINE)]
+    assert entries == sorted(entries), "entry numbers must increase down the document"
+    assert len(entries) == len(set(entries)), "entry numbers must not repeat"
+
+
+def test_indexed_filler_tokens_is_the_total_not_the_per_segment_size():
+    """A task author sizes the document, not each needle gap.
+
+    If filler_tokens were per segment, adding a needle would silently inflate
+    the prompt and could push it past the context window.
+    """
+    one, _ = render(INDEX1, 2000)
+    three, _ = render(f"{INDEX1}\n{INDEX2}\n{INDEX3}", 2000)
+    assert 0.8 < len(three.split()) / len(one.split()) < 1.2
+
+
+def test_indexed_filler_is_deterministic():
+    prompt = f"{INDEX1} x {INDEX2}"
+    assert render(prompt, 600) == render(prompt, 600)
+    assert render(prompt, 600)[0] != render(prompt, 600, seed=99)[0]
+
+
+@pytest.mark.parametrize("name", SUITES)
+def test_every_regex_pattern_in_the_suite_compiles(name: str):
     """Guards against Perl-only syntax such as \\z, which Python rejects."""
     import re
 
-    for task in load_suite("v1").tasks:
+    for task in load_suite(name).tasks:
         for pattern in task.validator.get("patterns", []):
             re.compile(pattern)
         if "answer_pattern" in task.validator:
             re.compile(task.validator["answer_pattern"])
 
 
-def test_no_validator_errors_against_the_fixtures():
+@pytest.mark.parametrize("name", SUITES)
+def test_no_validator_errors_against_the_fixtures(name: str):
     """Every task must grade cleanly on its canned response."""
     from caliper.backends import mock_backend_for_suite
     from caliper.evals.validators import grade
 
-    suite = load_suite("v1")
+    suite = load_suite(name)
     backend = mock_backend_for_suite(suite, models=["m:1b"])
     for task in suite.tasks:
         spec = dict(task.validator)

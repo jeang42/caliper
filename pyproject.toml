@@ -19,7 +19,7 @@ caliper = "caliper.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-caliper = ["evals/suites/v1/*.toml", "web/*.html", "web/*.css", "web/*.js"]
+caliper = ["evals/suites/*/*.toml", "web/*.html", "web/*.css", "web/*.js"]
 
 [tool.ruff]
 line-length = 100

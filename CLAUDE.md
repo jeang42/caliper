@@ -113,6 +113,15 @@ Break these and the output stops being evidence.
   one per thread.
 - **Denylists on grading state are wrong.** A warmup carries `graded=None` and
   slipped past a "not automatic" check. Use `GRADEABLE_STATES`.
+- **`{{FILLER}}` is substituted identically at every site**, so v1's
+  long-context documents repeat themselves and their entry numbers. v1's
+  stored prompts are 7000-8300 tokens, not the 4000-5000 its `filler_tokens`
+  suggests. Do not read `filler_tokens` as the document size for v1 tasks.
+- **A fixture key must survive filler substitution.** `prompt_keys` falls back
+  to the whole prompt, which for a long-context task still contains the
+  placeholder; such a key can never match, and the task would be graded on an
+  empty response - which looks exactly like a model that answered nothing.
+  Placeholder-bearing candidates are now rejected.
 
 ## Suite versioning
 
@@ -123,14 +132,40 @@ do **not** bump it, so purely editorial changes keep results comparable.
 Two runs are comparable when engine version, model digest and `suite_version`
 all match. `webapi.compare_runs` asserts this rather than assuming it.
 
-Adding tasks: prefer a new suite directory (`v2`) over mutating `v1`.
+Adding tasks: prefer a new suite directory over mutating an existing one. A new
+suite does not copy the tasks it keeps. It declares a `suite.toml` manifest
+with `extends`, `extends_version` and `replaces`, inherits every category it
+does not name, and provides its own files for the ones it does. `v2` is `v1`
+with `long_context` replaced.
+
+`extends_version` pins the base suite's version, and loading fails if the base
+has moved. That is deliberate: without the pin, editing `v1` would change what
+`v2` measures while `v2`'s own `suite_version` stayed put, and stored `v2` runs
+would claim comparability they no longer had. When you do change the base,
+update the pin and the extending suite's `suite_version` together.
+
+Two further rules the loader enforces, both about keeping a category mean over
+one task set: a replaced category must actually be provided, and a suite may
+not add tasks to a category it has not replaced.
 
 ## How to extend
 
-**A new task**: add it to the right `src/caliper/evals/suites/v1/*.toml`, add a
-fixture in `evals/fixtures.py` (a test asserts every task has one), bump
+**A new task**: add it to the right `src/caliper/evals/suites/<suite>/*.toml`,
+add a fixture in `evals/fixtures.py` (a test asserts every task has one), bump
 `suite_version` in every file of that suite, and give it an output budget that
 leaves a thinking model room to reach its answer.
+
+`FIXTURES` is keyed by task id across *all* suites, so a task id reused in two
+suites silently shares one canned response. Give a replacement task a new id.
+
+**A long-context task**: use the indexed placeholders `{{FILLER:1}}`,
+`{{FILLER:2}}`, ... rather than `{{FILLER}}`. The unindexed form substitutes
+the same block at every site, which repeats the prose and the entry numbers;
+it is kept only because v1 was measured with it. `filler_tokens` is the
+approximate total across all segments. Where the answer is a property of the
+generated document - a count, for instance - add a test that recomputes it
+from the rendered prompt, so the filler generator cannot drift away from the
+expected answer and score every model zero for a suite bug.
 
 **A new validator**: register it in `validators.py`, make it return partial
 credit where meaningful, and ask yourself whether it can match empty output.

@@ -1,0 +1,340 @@
+suite_version = "2.0.0"
+
+# Why these tasks look the way they do
+# ------------------------------------
+# v1's long-context tasks were single-needle retrieval in a 4000-5000 token
+# document with the needle stated verbatim in the terms of the question. Every
+# model measured scored 1.00. The tasks below keep the same document style but
+# change what has to happen to the document:
+#
+#   multi_hop_chain          four facts, chained, deliberately in reverse order
+#   resolve_supersession     three values for one setting; only the last holds
+#   count_markers            aggregation over the entire document, not a lookup
+#   distractor_precision     four near-identical needles; one qualifier selects
+#   absent_fact              the answer is not in the document at all
+#   event_ordering           reconstruct an order from scattered dates
+#   sum_scattered            arithmetic over three far-apart figures
+#   embedded_instruction_deep  a rule stated once at the top and never recalled
+#
+# Document size is deliberately held at v1's, NOT increased. v1's stored runs
+# averaged 7064-8280 prompt tokens per long-context attempt at num_ctx 16384 -
+# higher than its filler_tokens settings suggest, because the v1 placeholder
+# substitutes the same block at every site and two v1 tasks use it twice. The
+# v2 prompts measure roughly 8200-10100 estimated tokens, so the documents are
+# comparable in size and the needles are no longer duplicated.
+#
+# That comparability is the point: length and task structure are separate
+# axes, and changing both at once would make a v1-to-v2 score drop
+# unattributable. context_length stays at 16384 for the same reason - stage 5
+# showed qwen3-coder:30b already using 30767 of 32760 MiB at 32k, so raising
+# the window here would mix an offloading effect into a difficulty change.
+# Both the window and the document length can be varied afterwards, against a
+# v2 baseline measured at this size.
+#
+# Output budgets are 5120 (4096 where the answer is one line). Verified in v1
+# that 1536 was too tight: gpt-oss:20b truncated longctx.relate_distant 2 of 3
+# times and passed 2 of 2 at 4096. These tasks demand more reasoning than that
+# one, so the budget is larger again. A response that stops at the limit is
+# recorded as truncated.
+#
+# Each needle uses an entry number in the 9000s, well above the filler's own
+# numbering, so needles are NOT camouflaged within the log. These tasks
+# therefore measure retrieval-and-reasoning over a long document, not search
+# under camouflage. Camouflaged needles are a candidate for v3.
+#
+# Validator choice: `choice` is used where the answer is a small integer or a
+# token that cannot be written two ways, because its detail line records what
+# the model actually said, which is worth having when reviewing a hundred
+# attempts. `regex_all` is used where a correct answer has more than one
+# acceptable spelling - thousands separators, a hyphen or a space in a
+# revision code, a separator between list items - so that formatting variation
+# is not scored as a long-context failure. Instruction-following is its own
+# category.
+
+[[task]]
+id = "longctx.multi_hop_chain"
+category = "long_context"
+title = "Follow a four-step chain of references stated out of order"
+filler_tokens = 8000
+prompt = """Below is an operations log. Read it and answer the question after it.
+
+--- BEGIN LOG ---
+{{FILLER:1}}
+Entry 9011. Runbook RB-207 names revision R-4471 as the only approved firmware
+for the hardware it covers. The runbook it replaced, RB-118, named R-3390.
+{{FILLER:2}}
+Entry 9012. Change ticket CT-8814 was raised by the group that owns runbook
+RB-207.
+{{FILLER:3}}
+Entry 9013. The audit window referred to throughout this log is the window
+defined by change ticket CT-8814.
+{{FILLER:4}}
+Entry 9014. Runbook RB-207 supersedes runbook RB-118 in full.
+{{FILLER:5}}
+--- END LOG ---
+
+Question: which firmware revision is approved by the runbook owned by the group
+that raised the ticket defining the audit window? End your reply with exactly:
+Answer: <revision>"""
+max_output_tokens = 5120
+context_length = 16384
+
+# The four facts appear in reverse dependency order, so the chain cannot be
+# followed by reading forwards. R-3390 is the near-miss: it is the revision of
+# the superseded runbook and is stated in the same sentence as the right answer.
+[task.validator]
+kind = "regex_all"
+patterns = ["(?i)answer[^a-z0-9\\n]{0,12}R[-\\s]?4471\\b"]
+pass_threshold = 1.0
+
+[[task]]
+id = "longctx.resolve_supersession"
+category = "long_context"
+title = "Report the value in force after two supersessions"
+filler_tokens = 8000
+prompt = """Below is an operations log, in chronological order. Read it and
+answer the question after it.
+
+--- BEGIN LOG ---
+{{FILLER:1}}
+Entry 9021. The retention window for closed incidents was set to 30 days at
+installation.
+{{FILLER:2}}
+Entry 9022. The retention window for closed incidents was changed to 45 days,
+superseding the value set at installation.
+{{FILLER:3}}
+Entry 9023. The retention window for closed incidents was changed to 21 days,
+effective immediately and replacing every earlier setting.
+{{FILLER:4}}
+--- END LOG ---
+
+Question: how many days is the retention window for closed incidents at the end
+of this log? End your reply with exactly:
+Answer: <days>"""
+max_output_tokens = 5120
+context_length = 16384
+
+# Both 30 and 45 are stated as the retention window, and each is correct for
+# part of the log. Filler follows the final value so that answering from the
+# tail of the document is not enough either.
+[task.validator]
+kind = "choice"
+answer_pattern = "answer[^0-9\\n]{0,12}(\\d+)"
+expected = "21"
+
+[[task]]
+id = "longctx.count_markers"
+category = "long_context"
+title = "Count every marked entry in the whole document"
+filler_tokens = 8000
+prompt = """Below is an operations log. Read it and answer the question after it.
+
+--- BEGIN LOG ---
+{{FILLER:1}}
+Entry 9101. The retry queue reported a sustained backlog during the nightly
+compaction pass. Status: ESCALATED
+{{FILLER:2}}
+Entry 9102. The config loader rejected a manifest for the second consecutive
+day. Status: ESCALATED
+{{FILLER:3}}
+Entry 9103. The shard router lost quorum for 40 seconds. Status: ESCALATED
+{{FILLER:4}}
+Entry 9104. The index compactor exceeded its maintenance window. Status: ESCALATED
+{{FILLER:5}}
+Entry 9105. The metrics agent dropped samples during the regional failover
+drill. Status: ESCALATED
+{{FILLER:6}}
+Entry 9106. The batch planner produced a duplicate job id. Status: ESCALATED
+{{FILLER:7}}
+--- END LOG ---
+
+Question: how many of the entries in this log have been escalated? End your
+reply with exactly:
+Answer: <count>"""
+max_output_tokens = 5120
+context_length = 16384
+
+# Aggregation, not retrieval: a single correct answer requires having attended
+# to all seven filler segments, because a marker missed anywhere changes it. A
+# test asserts the expected count equals the number of markers in the rendered
+# prompt, so the filler generator cannot drift away from this answer silently.
+# The question deliberately does not repeat the marker string: if it did, the
+# rendered prompt would contain seven copies of it and a model counting string
+# occurrences rather than entries would be wrong for a reason that has nothing
+# to do with long context.
+[task.validator]
+kind = "choice"
+answer_pattern = "answer[^0-9\\n]{0,12}(\\d+)"
+expected = "6"
+
+[[task]]
+id = "longctx.distractor_precision"
+category = "long_context"
+title = "Select one of four near-identical needles by its qualifier"
+filler_tokens = 8000
+prompt = """Below is an operations log. Read it and answer the question after it.
+
+--- BEGIN LOG ---
+{{FILLER:1}}
+Entry 9031. The peak queue depth observed in quarter Q4 was 58302.
+{{FILLER:2}}
+Entry 9032. The peak queue depth observed in quarter Q3 was 20764.
+{{FILLER:3}}
+Entry 9033. The peak queue depth observed in quarter Q1 was 41820.
+{{FILLER:4}}
+Entry 9034. The peak queue depth observed in quarter Q2 was 73915.
+{{FILLER:5}}
+--- END LOG ---
+
+Question: what was the peak queue depth observed in quarter Q3? End your reply
+with exactly:
+Answer: <depth>"""
+max_output_tokens = 5120
+context_length = 16384
+
+# The four needles are identical but for the quarter and the value. Q3 is
+# neither the largest value nor the last stated, so neither salience nor
+# recency selects it. The values are five digits, which the filler never
+# produces, so a wrong answer is traceable to a specific needle.
+[task.validator]
+kind = "regex_all"
+patterns = ["(?i)answer[^0-9\\n]{0,12}20,?764\\b"]
+pass_threshold = 1.0
+
+[[task]]
+id = "longctx.absent_fact"
+category = "long_context"
+title = "Report that the document does not contain the answer"
+filler_tokens = 8000
+prompt = """Below is an operations log. Read it and answer the question after it.
+
+--- BEGIN LOG ---
+{{FILLER:1}}
+Entry 9041. The approved firmware revision for the shard router is R-4471.
+{{FILLER:2}}
+Entry 9042. The approved firmware revision for the index compactor is R-5120.
+{{FILLER:3}}
+--- END LOG ---
+
+Question: which firmware revision is approved for the metrics agent? End your
+reply with exactly `Answer: NOT STATED` if this log does not state it, or
+exactly `Answer: <revision>` if it does."""
+max_output_tokens = 5120
+context_length = 16384
+
+# The metrics agent appears throughout the filler, and two other components
+# have an approved revision stated in exactly the form the question asks for,
+# so the shape of the answer is present everywhere while the answer is not.
+# A model that pattern-matches the question against the document rather than
+# checking the subject will answer R-4471 or R-5120.
+[task.validator]
+kind = "regex_all"
+patterns = ["(?i)answer[^a-z\\n]{0,12}not[\\s_-]?stated\\b"]
+pass_threshold = 1.0
+
+[[task]]
+id = "longctx.event_ordering"
+category = "long_context"
+title = "Reconstruct an order from four scattered dates"
+filler_tokens = 8000
+prompt = """Below is an operations log. Read it and answer the question after it.
+
+--- BEGIN LOG ---
+{{FILLER:1}}
+Entry 9051. Project THETA completed its cutover on day 212.
+{{FILLER:2}}
+Entry 9052. Project SIGMA completed its cutover on day 341.
+{{FILLER:3}}
+Entry 9053. Project KAPPA completed its cutover on day 59.
+{{FILLER:4}}
+Entry 9054. Project OMEGA completed its cutover on day 134.
+{{FILLER:5}}
+--- END LOG ---
+
+Question: list the four project codenames in the order their cutovers
+completed, earliest first. End your reply with exactly one line:
+Order: <name>, <name>, <name>, <name>"""
+max_output_tokens = 5120
+context_length = 16384
+
+# All four facts must be held at once, and the document order is not the
+# answer order. Guessing is 1 in 24. Filler entries mention day numbers
+# constantly, so the dates cannot be found by scanning for digits.
+[task.validator]
+kind = "regex_all"
+patterns = [
+  "(?i)order\\b[^a-z\\n]{0,8}kappa[^a-z\\n]{1,8}omega[^a-z\\n]{1,8}theta[^a-z\\n]{1,8}sigma",
+]
+pass_threshold = 1.0
+
+[[task]]
+id = "longctx.sum_scattered"
+category = "long_context"
+title = "Add three figures stated far apart"
+filler_tokens = 8000
+prompt = """Below is an operations log. Read it and answer the question after it.
+
+--- BEGIN LOG ---
+Entry 9061. A request for 60000 gibibytes of additional staging capacity was
+filed and is still open.
+{{FILLER:1}}
+Entry 9062. The ingest tier was allocated 18450 gibibytes of staging capacity.
+{{FILLER:2}}
+Entry 9063. The archive tier was allocated 27300 gibibytes of staging capacity.
+{{FILLER:3}}
+Entry 9064. The replay tier was allocated 9125 gibibytes of staging capacity.
+{{FILLER:4}}
+--- END LOG ---
+
+Question: what is the total staging capacity, in gibibytes, allocated across
+the tiers named in this log? End your reply with exactly:
+Answer: <total>"""
+max_output_tokens = 5120
+context_length = 16384
+
+# 18450 + 27300 + 9125 = 54875. The open request for 60000 is the distractor:
+# it is a capacity figure in the same units that is not an allocation, and it
+# is stated first, where a model that stops reading early will find it.
+[task.validator]
+kind = "regex_all"
+patterns = ["(?i)answer[^0-9\\n]{0,12}54,?875\\b"]
+pass_threshold = 1.0
+
+[[task]]
+id = "longctx.embedded_instruction_deep"
+category = "long_context"
+title = "Obey a formatting rule stated once, before a long document"
+filler_tokens = 10000
+prompt = """Formatting rule for your entire reply, stated once: give your answer
+as a single line of the form `RESULT: <n> incidents`.
+
+Now read the log below.
+
+--- BEGIN LOG ---
+{{FILLER:1}}
+Entry 9071. Exactly thirteen retry-queue incidents were closed during the audit
+window.
+{{FILLER:2}}
+{{FILLER:3}}
+--- END LOG ---
+
+Question: how many retry-queue incidents were closed during the audit window?"""
+max_output_tokens = 4096
+context_length = 16384
+
+# v1's version of this task restated the rule in the closing question. This one
+# does not, and the document is about two and a half times longer, so the rule
+# has to survive the whole context. The count is spelled as a word so that
+# scanning the document for digits does not find it.
+#
+# Two patterns give partial credit: 0.5 means the prefix was obeyed but the
+# value or the unit was wrong. Neither pattern checks that the reply contains
+# nothing else, because that is instruction-following rather than long-context
+# behaviour, and it has its own category.
+[task.validator]
+kind = "regex_all"
+patterns = [
+  "(?mi)^RESULT:\\s*(?:13|thirteen)\\s+incidents\\s*$",
+  "(?mi)^RESULT:",
+]
+pass_threshold = 1.0

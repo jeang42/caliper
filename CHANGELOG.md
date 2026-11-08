@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.3.0 — 2026-11-08
+
+Suite `v2`: a harder long-context category. **Nothing has been measured
+against it yet** — this release is task authoring and the machinery to carry
+it, not results.
+
+- **Suite `v2`**, 30 tasks: `v1`'s three long-context tasks replaced by eight
+  that require multi-hop chains stated in reverse order, aggregation over the
+  whole document, resolving two supersessions, rejecting three near-identical
+  distractors, reporting an absent fact instead of inventing one,
+  reconstructing an order from scattered dates, arithmetic over far-apart
+  figures, and obeying a formatting rule stated once before the document and
+  never recalled. Each has a specific wrong answer a partial read produces,
+  and a test asserts the validator rejects it.
+- **Why only this category.** With five models measured, five of six
+  categories discriminate with spreads of 0.33-0.56. `long_context` was the
+  only saturated one: 1.00 for every model at every context length in stage 5,
+  including the 29%-offloaded case. So this is a one-category replacement, not
+  a suite rewrite.
+- **Suites can extend other suites.** A `suite.toml` manifest names the base,
+  the base version it was composed against, and the categories it replaces;
+  everything else is inherited rather than copied, so `v2` runs report all six
+  categories and the five it did not touch stay directly comparable to the
+  stored `v1` runs. The version pin makes the one real hazard loud: edit `v1`
+  and loading `v2` fails, instead of silently changing what `v2` measures
+  while `v2`'s own `suite_version` stays at 2.0.0. The loader also refuses to
+  replace a category without providing it, and refuses to add tasks to a
+  category that was not replaced — both would put a category mean over
+  different task sets in different runs.
+- **Indexed filler placeholders** `{{FILLER:1}}`, `{{FILLER:2}}`, ... give
+  each site distinct prose with entry numbering continuing across segments,
+  and `filler_tokens` becomes the approximate total rather than the per-site
+  size. The unindexed `{{FILLER}}` substitutes one identical block everywhere;
+  it is unchanged and verified to render v1's prompts byte-for-byte, because
+  v1's results were measured with it.
+- **A correction this exposed.** v1's long-context documents are about twice
+  the size its `filler_tokens` settings suggest, because two of its tasks use
+  `{{FILLER}}` twice and got the same block both times: its stored runs
+  average 7064-8280 prompt tokens, not 4000-5000. v2's documents are held at
+  that same size deliberately, so a v1-to-v2 score change is attributable to
+  task difficulty rather than to length.
+- **`prompt_keys` no longer returns a key containing a placeholder.** It falls
+  back to the whole prompt when head and tail are not unique, and for a
+  long-context task that prompt still holds `{{FILLER}}` — a key that can
+  never match a rendered prompt, so the fixture would be skipped and the task
+  graded on an empty response, which is indistinguishable from a model that
+  answered nothing.
+- **Stages `8a` and `8b`** added to `scripts/benchmark-stage.sh` for the v2
+  long-context runs. Neither has been run.
+- 243 tests.
+
 ## 0.2.1 — 2026-11-08
 
 Benchmark stages 4 and 5 executed. Five models and a full context-scaling

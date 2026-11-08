@@ -41,6 +41,11 @@ tasks only.
 currently carries no information. The other five discriminate, with spreads of
 0.33 to 0.56.
 
+Suite `v2` replaces those three long-context tasks with eight harder ones and
+inherits the other five categories unchanged. **No model has been run against
+`v2`, so there is nothing to report for it here.** Stage `8a` in
+`scripts/benchmark-stage.sh` is the run that would produce it.
+
 ## Performance
 
 | Model | output tok/s | prompt tok/s | TTFT s | latency s | truncated |
@@ -123,7 +128,14 @@ quality axis and truncated 30 of 75 attempts.
 
 - 45 rubric attempts are ungraded, so the agent, coding, reasoning and tool-use
   categories are currently measured by their automatic tasks only.
-- `long_context` discriminates nothing at present.
+- `long_context` discriminates nothing at present. Suite `v2` exists to fix
+  that and has not been measured.
+- The v1 long-context documents are larger than the suite's `filler_tokens`
+  settings suggest. Two of the three tasks use the `{{FILLER}}` placeholder
+  twice and receive the same block both times, so the prompts above averaged
+  7064-8280 tokens rather than the 4000-5000 implied. The figures in this file
+  are the engine's own token counts and are unaffected; only a reading of the
+  task definitions would mislead.
 - Tool-use tasks are simulated: tools are declared but never executed.
 - `gpt-oss:20b` fails to terminate on two tight negative-constraint
   instruction tasks, producing 18,300 and 12,817 characters of reasoning at a

@@ -402,3 +402,52 @@ def test_grade_is_rejected_for_a_skipped_validator(store):
     assert attempt["graded"] == "skipped"
     with pytest.raises(ApiError, match="grading state"):
         webapi.set_grade(store, {"attempt_id": attempt["id"], "score": 1, "max_score": 1})
+
+
+def test_attempt_detail_rebuilds_the_long_context_document(store):
+    """A reviewer must see the document the model saw, not the placeholder.
+
+    Rendered prompts are not stored per attempt - at 8000 tokens each they
+    would dominate the database - so the attempt detail rebuilds one from the
+    run's seed. This asserts the reconstruction is identical to what the runner
+    sent, which only holds while both go through ``longctx.render`` with the
+    same seed.
+    """
+    from caliper.evals import longctx
+
+    v2 = load_suite("v2")
+    suite = Suite(
+        name="v2",
+        suite_version=v2.suite_version,
+        tasks=[v2.get("longctx.count_markers")],
+    )
+    sent: list[str] = []
+    backend = mock_backend_for_suite(suite, models=["m:1b"])
+    inner = backend.generate
+
+    def record(model, prompt, **kwargs):
+        sent.append(prompt)
+        return inner(model, prompt, **kwargs)
+
+    backend.generate = record  # type: ignore[method-assign]
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0, suite="v2", seed=7)
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(suite)
+
+    (attempt,) = webapi.list_attempts(store, outcome.run_id)["attempts"]
+    task = webapi.get_attempt(store, attempt["id"])["task"]
+    assert task["rendered_prompt"] == sent[0]
+    assert "{{FILLER" not in task["rendered_prompt"]
+    # The seed is what makes this reproducible: a different one is a different
+    # document, so a mismatched seed would be a silently wrong review surface.
+    other, _ = longctx.render(task["prompt"], task["filler_tokens"], seed=8)
+    assert other != task["rendered_prompt"]
+
+
+def test_attempt_detail_has_no_rendered_prompt_for_a_short_task(store, run_id):
+    """Only filler tasks pay the rebuild; everything else stays untouched."""
+    attempt = next(
+        a
+        for a in webapi.list_attempts(store, run_id)["attempts"]
+        if a["category"] != "long_context"
+    )
+    assert webapi.get_attempt(store, attempt["id"])["task"]["rendered_prompt"] is None

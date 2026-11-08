@@ -171,6 +171,28 @@ Tasks live in `src/caliper/evals/suites/<version>/*.toml` and are original
 content. Every suite declares a `suite_version` that is stored with each run,
 so results are only compared when they were graded by the same definitions.
 
+Two suites are installed:
+
+| Suite | Tasks | What it is |
+|---|---|---|
+| `v1` | 25 | The measured baseline. Every stored result to date uses it. |
+| `v2` | 30 | `v1` with its three long-context tasks replaced by eight harder ones. |
+
+`v1` remains the default, because `v2` has not been measured yet. Select a
+suite with `--suite v2` on `run`, `plan` and `tasks`.
+
+A suite may extend another through a `suite.toml` manifest, naming the
+categories it replaces and inheriting the rest instead of copying them. The
+manifest pins the base suite's version: edit `v1` and loading `v2` fails and
+says so, rather than quietly changing what `v2` measures while `v2`'s own
+`suite_version` stays put.
+
+Long-context tasks substitute deterministic generated filler for a
+placeholder. `{{FILLER}}` (v1) puts the *same* block at every site;
+`{{FILLER:1}}`, `{{FILLER:2}}`, ... (v2) put distinct prose at each, with entry
+numbering continuing across them, and `filler_tokens` then means the
+approximate total across all segments rather than the size of each.
+
 Validators: `exact`, `contains_all`, `regex_all`, `choice`, `numeric`,
 `json_schema`, `tool_call`, `python_cases`, `rubric`.
 

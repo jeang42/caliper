@@ -8,16 +8,31 @@ roughly in the order it becomes worth building.
 **A CLI cross-run comparison.** `/api/compare` and the viewer do this already;
 `caliper compare --run A --run B` would make it available without a browser.
 
-**Harder tasks.** `gpt-oss:20b` scored 1.00 on five of six categories in stage
-2, so the suite has a ceiling: it separates weak from strong but cannot resolve
-differences between strong models. This is the highest-value evaluation work
-outstanding. Additions should land as `v2` rather than mutating `v1`.
+**Harder long-context tasks — done, not yet measured.** With five models
+measured, five of the six categories discriminate with spreads of 0.33 to 0.56;
+only `long_context` was saturated, every model scoring 1.00 on all three tasks
+at every context length in stage 5, including the case where 29% of the model
+was offloaded. Suite `v2` replaces that category with eight harder tasks
+(multi-hop chains, aggregation over the whole document, superseded values,
+near-miss distractors, an absent fact, an order to reconstruct, arithmetic over
+scattered figures, and a formatting rule stated once before the document). The
+other five categories are inherited from `v1` unchanged, so they stay directly
+comparable to the stored runs. **No model has been run against `v2` yet**, so
+nothing is known about whether it discriminates; stage `8a` in
+`scripts/benchmark-stage.sh` is the run that would find out.
 
-**Grow the suite.** Suite `v1` is 25 tasks, which is enough to separate models
-coarsely and not enough to resolve small differences. Additions should land as
-`v2` rather than mutating `v1`, so existing results stay comparable. Priorities:
-more partial-credit coding tasks, multi-turn instruction following, and
-long-context tasks at several lengths of the same question.
+**Camouflaged needles, as a possible `v3`.** `v2`'s needles use entry numbers
+in the 9000s, well above the filler's own numbering, so they are findable by
+their shape. That makes `v2` a test of retrieval and reasoning over a long
+document, not of search under camouflage. Blending needles into the filler's
+numbering would add that axis, and would need the filler generator to place
+them rather than the task author.
+
+**Grow the other categories.** The remaining priorities are more
+partial-credit coding tasks, multi-turn instruction following, and the same
+long-context question asked at several document lengths. The suite-extension
+mechanism `v2` introduced makes each of these a new suite that replaces one
+category and inherits the rest, so existing results stay comparable.
 
 **Real tool execution.** Tool-use tasks are simulated: tools are declared but
 never called. A small in-process tool loop with deterministic fake tools would

@@ -10,7 +10,7 @@
 | Backend adapter | `caliper/backends/ollama.py` | Ollama API, streaming generation, timing capture |
 | Backend interface | `caliper/backends/base.py` | The `Backend` protocol a vLLM adapter will implement |
 | Mock backend | `caliper/backends/mock.py` | Deterministic in-process engine for tests and dry runs |
-| Evaluation dataset | `caliper/evals/suites/` | Versioned task definitions in TOML |
+| Evaluation dataset | `caliper/evals/suites/` | Versioned task definitions in TOML; a suite may extend another |
 | Validators | `caliper/evals/validators.py` | Automated grading; manual rubric passthrough |
 | Benchmark runner | `caliper/runner.py` | Serial execution, telemetry attribution, persistence |
 | Storage | `caliper/storage.py` | SQLite schema and access |

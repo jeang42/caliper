@@ -25,7 +25,7 @@ asserts they never will.
 | GET | `/api/runs/<run_id>` | Full aggregation: run metadata, per-model category scores, performance, telemetry, per-profile rankings, live progress |
 | GET | `/api/runs/<run_id>/attempts` | Attempt list (bulky text fields omitted) |
 | GET | `/api/runs/<run_id>/grading` | Rubric attempts with their criteria and any human score |
-| GET | `/api/attempts/<id>` | One attempt in full: response, thinking, tool calls, telemetry, options, plus the task definition |
+| GET | `/api/attempts/<id>` | One attempt in full: response, thinking, tool calls, telemetry, options, plus the task definition and, for a long-context task, the rendered document |
 | GET | `/api/status` | Current GPU telemetry and any run still executing |
 | GET | `/api/compare?run=A&run=B` | Several runs side by side, with comparability warnings |
 
@@ -65,6 +65,19 @@ Attempts are committed to SQLite as each one completes, so polling
 the runner publishing anything. The viewer polls `/api/status` every 3
 seconds. `active_run.attempts_expected` is derived from the stored run
 configuration and is an estimate when a run was filtered to a subset of tasks.
+
+### Rendered long-context prompts
+
+A long-context task's prompt is a template: `{{FILLER}}` or `{{FILLER:1}}`,
+`{{FILLER:2}}`, ... are replaced at run time with deterministic generated
+prose. The rendered prompt is **not** stored per attempt - at 8000 tokens each
+it would dominate the database - so `/api/attempts/<id>` rebuilds it from the
+run's stored seed and returns it as `task.rendered_prompt`. It is `null` for a
+task without filler.
+
+Because it is a reconstruction rather than a recording, it is faithful only
+while the generator and the seed are unchanged; a test asserts it matches what
+the runner sent. `task.prompt` remains the unrendered template.
 
 ## Python API
 

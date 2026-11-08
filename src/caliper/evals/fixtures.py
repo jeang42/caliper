@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .longctx import INDEXED_PLACEHOLDER, PLACEHOLDER
 from .spec import Suite
 
 PROMPT_KEY_LENGTH = 80
@@ -163,6 +164,26 @@ FIXTURES: dict[str, dict[str, Any]] = {
         "text": "Entry 0001 caps the cache at 12 GiB and entry 9002 asks for 15 GiB.\nAnswer: no"
     },
     "longctx.embedded_instruction": {"text": "RESULT: 7"},
+    # --- long context, suite v2 -------------------------------------------
+    # Deliberately mixed: five pass, two fail on the trap each task sets, and
+    # one takes partial credit, so a dry run exercises every branch of the
+    # harder long-context validators rather than only their success path.
+    "longctx.multi_hop_chain": {
+        "text": ("RB-118 named R-3390 and RB-207 replaced it.\nAnswer: R-3390")
+    },
+    "longctx.resolve_supersession": {
+        "text": "Entry 9023 replaces every earlier setting.\nAnswer: 21"
+    },
+    "longctx.count_markers": {"text": "Entries 9101 through 9106.\nAnswer: 6"},
+    "longctx.distractor_precision": {"text": "Entry 9032 gives Q3.\nAnswer: 20764"},
+    "longctx.absent_fact": {"text": "The log gives revisions for two components.\nAnswer: R-4471"},
+    "longctx.event_ordering": {
+        "text": "Days 59, 134, 212, 341.\nOrder: KAPPA, OMEGA, THETA, SIGMA"
+    },
+    "longctx.sum_scattered": {
+        "text": "18450 + 27300 + 9125, excluding the open request.\nAnswer: 54875"
+    },
+    "longctx.embedded_instruction_deep": {"text": "RESULT: 13 closed"},
     # --- agent ------------------------------------------------------------
     "agent.decompose_task": {
         "text": (
@@ -204,6 +225,11 @@ def prompt_keys(suite: Suite) -> dict[str, str]:
     prompt - the actual question - is tried first, then the head, then the
     whole prompt. Long-context prompts keep their tail intact after filler
     substitution, which is why the tail is preferred.
+
+    A candidate containing a filler placeholder is rejected even when it is
+    unique, because the placeholder is gone by the time the mock backend sees
+    the prompt, so such a key could never match and the fixture would be
+    silently skipped instead of failing.
     """
     keys: dict[str, str] = {}
     prompts = [t.prompt for t in suite.tasks]
@@ -213,6 +239,8 @@ def prompt_keys(suite: Suite) -> dict[str, str]:
             task.prompt[:PROMPT_KEY_LENGTH],
             task.prompt,
         ):
+            if PLACEHOLDER in candidate or INDEXED_PLACEHOLDER.search(candidate):
+                continue
             if sum(1 for p in prompts if candidate in p) == 1:
                 keys[task.id] = candidate
                 break

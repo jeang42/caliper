@@ -33,11 +33,16 @@ declare -A STAGES=(
   [5a]="context scaling at 16k|--model gpt-oss:20b --model qwen3-coder:30b --category long_context --repetitions 2 --warmup 1 --context 16384 --timeout 900"
   [5b]="context scaling at 32k|--model gpt-oss:20b --model qwen3-coder:30b --category long_context --repetitions 2 --warmup 1 --context 32768 --timeout 900"
   [5c]="context scaling at 64k|--model gpt-oss:20b --model qwen3-coder:30b --category long_context --repetitions 2 --warmup 1 --context 65536 --timeout 1200"
+  # Suite v2 replaces the long-context category with eight harder tasks. The
+  # window stays at the tasks' own 16384 so this measures difficulty, not
+  # offloading; 8b re-measures the same tasks at 32k for the scaling curve.
+  [8a]="v2 long context: all five measured models, harder tasks|--suite v2 --category long_context --model gpt-oss:20b --model qwen3-coder:30b --model qwen3.5:35b --model glm-4.7-flash:latest --model qwen3.8:27b --repetitions 3 --warmup 1 --timeout 1200"
+  [8b]="v2 long context at 32k|--suite v2 --category long_context --model gpt-oss:20b --model qwen3-coder:30b --repetitions 2 --warmup 1 --context 32768 --timeout 1200"
 )
 
 if [[ "${1:-}" == "list" || -z "${1:-}" ]]; then
     echo "Stages (see docs/CANDIDATES.md for the rationale):"
-    for key in 1 2 3 4 5a 5b 5c; do
+    for key in 1 2 3 4 5a 5b 5c 8a 8b; do
         printf "  %-3s %s\n" "$key" "${STAGES[$key]%%|*}"
     done
     echo

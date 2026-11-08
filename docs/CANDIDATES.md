@@ -150,6 +150,20 @@ moving on.
 7. **Optional offload experiment.** `gpt-oss:120b` (65.37 GB) or the 70B
    IQ3_XS tag, long-context category only, with a raised timeout, purely to
    quantify how badly offload hurts on this host.
+8. **Suite `v2`, long-context category.** Stages 3 to 5 found the v1
+   long-context tasks saturated: all five models scored 1.00 at every context
+   length, including when 29% of the model was offloaded, so the category
+   separated nothing. Suite `v2` replaces those three tasks with eight harder
+   ones and inherits the other five categories from `v1` unchanged.
+   - **8a**: all five measured models, `--suite v2 --category long_context`,
+     3 repetitions, at the tasks' own `num_ctx` 16384. Estimated 15-25 minutes;
+     the estimator costs this from v1 history, where the documents were the
+     same size but the output budgets smaller, so treat it as a floor.
+   - **8b**: the top two models again at `--context 32768`, which extends the
+     stage 5 scaling curve onto tasks that can actually fail.
+
+   Both are scripted: `./scripts/benchmark-stage.sh 8a`. They need no
+   download, and nothing about them is measured yet.
 
 ## Proposed download plan
 
