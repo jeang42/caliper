@@ -25,6 +25,7 @@ from .logging_setup import setup_logging
 from .regrade import regrade_run
 from .report import PROFILES, render_markdown, summarize_run
 from .runner import BenchmarkRunner, RunAborted, RunSettings, estimate_run_cost
+from .server import serve
 from .storage import Store
 
 log = logging.getLogger("caliper")
@@ -297,6 +298,33 @@ def cmd_tasks(args: argparse.Namespace, config: Config) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace, config: Config) -> int:
+    """Start the local viewer.
+
+    Binding anywhere but loopback needs --allow-remote, because the viewer
+    exposes machine telemetry, model inventory and raw model output and has no
+    authentication. Use an SSH tunnel to reach it from another machine.
+    """
+    host = args.host
+    if host not in {"127.0.0.1", "localhost", "::1"} and not args.allow_remote:
+        print(
+            f"refusing to bind {host}: the viewer has no authentication and exposes "
+            "telemetry, inventory and raw model output.\n"
+            "Use an SSH tunnel (ssh -L 8777:127.0.0.1:8777 <host>), or pass "
+            "--allow-remote if you really mean it.",
+            file=sys.stderr,
+        )
+        return 2
+    if not config.db_path.exists():
+        print(
+            f"no database at {config.db_path}; run a benchmark first (try: caliper run --dry-run)",
+            file=sys.stderr,
+        )
+        return 2
+    serve(config, host=host, port=args.port)
+    return 0
+
+
 def cmd_profiles(args: argparse.Namespace, config: Config) -> int:
     for key, spec in PROFILES.items():
         print(f"{key}: {spec['label']}")
@@ -425,6 +453,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_tasks.add_argument("--category", action="append", choices=list(CATEGORIES), default=[])
     p_tasks.add_argument("--verbose-tasks", action="store_true")
     p_tasks.set_defaults(func=cmd_tasks)
+
+    p_serve = sub.add_parser("serve", help="start the local read-only web viewer")
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8777)
+    p_serve.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="permit binding a non-loopback address (no authentication is provided)",
+    )
+    p_serve.set_defaults(func=cmd_serve)
 
     p_prof = sub.add_parser("profiles", help="show workload weighting profiles")
     p_prof.set_defaults(func=cmd_profiles)

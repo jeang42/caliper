@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.2.0 — 2026-11-08
+
+Web viewer, manual rubric grading, and re-grading without inference.
+
+- **`caliper serve`** starts a single-page viewer over the same SQLite
+  database: runs, category scores, performance, memory and loading behaviour,
+  an attempt browser showing every raw response, thinking text and tool call,
+  and cross-run comparison that states whether runs are actually comparable
+  rather than lining up numbers that are not. Live GPU telemetry and
+  in-flight run progress come free, because attempts are committed as they
+  complete.
+- **Rubric grading queue.** Each response beside its criteria, a checkbox per
+  criterion. Scores live in a `manual_scores` table, keyed by attempt and
+  separate from automatic scores, so `caliper regrade` cannot destroy them;
+  reports show them as their own table and never merge them into automatic
+  means.
+- The viewer cannot start, stop or configure a benchmark. `webapi.py` and
+  `server.py` do not import the runner and a test asserts they never will.
+- `serve` binds loopback and refuses any other address without
+  `--allow-remote`, because it has no authentication and serves telemetry,
+  inventory and raw model output.
+- Fixed a hole in the grading guard: it denied `graded == "automatic"`, but a
+  warmup carries `graded = None` and slipped through, so a warmup could be
+  given a score. Replaced with an allowlist (`GRADEABLE_STATES`).
+- Zero new runtime dependencies: `http.server` and one hand-written page.
+- New docs: `docs/API.md` (HTTP and Python APIs for other programs and
+  agents) and `CLAUDE.md` (working agreement for coding agents — invariants,
+  metric definitions, and the mistakes already made once).
+- Tests: 203 passing, including socket-level server tests, path-traversal
+  refusal, and the grading write path.
+
 ## 0.1.2 — 2026-11-08
 
 Stage 3 comparison run (3 models, 228 attempts, 22 min, zero request

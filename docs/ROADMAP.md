@@ -5,15 +5,13 @@ roughly in the order it becomes worth building.
 
 ## Near term
 
-**Write manual rubric scores back into the database.** Five tasks per run are
-hand-graded and the scores currently live outside Caliper (see
-[GRADING.md](GRADING.md)). A `caliper grade` command that reads a CSV keyed by
-`(run_id, model, task_id, repetition)` and fills in the attempt rows would let
-rubric categories appear in reports alongside the automatic ones.
+**A CLI cross-run comparison.** `/api/compare` and the viewer do this already;
+`caliper compare --run A --run B` would make it available without a browser.
 
-**Cross-run comparison.** `caliper report` covers one run. A `caliper compare
---run A --run B` that refuses to compare mismatched `suite_version`, engine
-version or model digest, and states what differs when it does proceed.
+**Harder tasks.** `gpt-oss:20b` scored 1.00 on five of six categories in stage
+2, so the suite has a ceiling: it separates weak from strong but cannot resolve
+differences between strong models. This is the highest-value evaluation work
+outstanding. Additions should land as `v2` rather than mutating `v1`.
 
 **Grow the suite.** Suite `v1` is 25 tasks, which is enough to separate models
 coarsely and not enough to resolve small differences. Additions should land as
@@ -95,8 +93,6 @@ already records a full machine snapshot per run and the hostname, so results
 from several machines can share one database. A remote worker needs only a way
 to reach a remote engine URL and a run label identifying the host — no
 architectural change. Distributed GPU inference is explicitly out of scope.
-
-**A web dashboard.** Only after the CLI reports stop changing shape.
 
 **Nexurite integration.** Through the stable surfaces in
 [ARCHITECTURE.md](ARCHITECTURE.md) — the JSON exports, `summarize_run`,

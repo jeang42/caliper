@@ -110,6 +110,19 @@ CREATE TABLE IF NOT EXISTS inventories (
     payload_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS manual_scores (
+    attempt_id  INTEGER PRIMARY KEY REFERENCES attempts(id) ON DELETE CASCADE,
+    run_id      TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    score       REAL NOT NULL,
+    max_score   REAL NOT NULL,
+    criteria_json TEXT,
+    grader      TEXT,
+    notes       TEXT,
+    graded_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_run ON manual_scores(run_id);
+
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -338,6 +351,80 @@ class Store:
                 WHERE id = ?""",
             updates,
         )
+
+    # -- manual grading ---------------------------------------------------
+    def set_manual_score(
+        self,
+        attempt_id: int,
+        run_id: str,
+        score: float,
+        max_score: float,
+        criteria: list[dict[str, Any]] | None = None,
+        grader: str | None = None,
+        notes: str = "",
+    ) -> None:
+        """Record a human score for one attempt at a rubric task.
+
+        Manual scores live in their own table rather than overwriting the
+        attempt row, so a re-grade of the automatic validators can never
+        destroy human work, and the provenance of each number stays obvious.
+        """
+        if max_score <= 0:
+            raise ValueError("max_score must be positive")
+        if not 0 <= score <= max_score:
+            raise ValueError(f"score {score} outside 0..{max_score}")
+        self._conn.execute(
+            """INSERT OR REPLACE INTO manual_scores
+               (attempt_id, run_id, score, max_score, criteria_json, grader, notes, graded_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                attempt_id,
+                run_id,
+                score,
+                max_score,
+                _dumps(criteria),
+                grader,
+                notes,
+                utcnow(),
+            ),
+        )
+
+    def manual_scores(self, run_id: str) -> dict[int, sqlite3.Row]:
+        rows = self._conn.execute(
+            "SELECT * FROM manual_scores WHERE run_id = ?", (run_id,)
+        ).fetchall()
+        return {row["attempt_id"]: row for row in rows}
+
+    def delete_manual_score(self, attempt_id: int) -> None:
+        self._conn.execute("DELETE FROM manual_scores WHERE attempt_id = ?", (attempt_id,))
+
+    def attempt(self, attempt_id: int) -> sqlite3.Row | None:
+        return self._conn.execute("SELECT * FROM attempts WHERE id = ?", (attempt_id,)).fetchone()
+
+    def run_progress(self, run_id: str) -> dict[str, Any]:
+        """Live progress counters for a run, safe to poll.
+
+        Attempts are committed as they complete, so this reflects a run that is
+        still executing without the runner having to publish anything.
+        """
+        row = self._conn.execute(
+            """SELECT COUNT(*) AS attempts,
+                      SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures,
+                      MAX(started_at) AS latest
+                 FROM attempts WHERE run_id = ?""",
+            (run_id,),
+        ).fetchone()
+        last = self._conn.execute(
+            """SELECT model, task_id, repetition, is_warmup FROM attempts
+                WHERE run_id = ? ORDER BY id DESC LIMIT 1""",
+            (run_id,),
+        ).fetchone()
+        return {
+            "attempts": row["attempts"] or 0,
+            "failures": row["failures"] or 0,
+            "latest_at": row["latest"],
+            "last_attempt": dict(last) if last else None,
+        }
 
     def save_inventory(self, payload: dict[str, Any], hostname: str, engine: str) -> str:
         inv_id = new_id()

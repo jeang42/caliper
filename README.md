@@ -78,6 +78,53 @@ reports are deliberately separate operations; Caliper never downloads a model.
 | `report` | Markdown or JSON report for a stored run | no |
 | `runs` | List stored runs | no |
 | `export` | JSON + CSV export of a run | no |
+| `regrade` | Re-score a stored run with current validators | no |
+| `serve` | Local web viewer and grading queue | no |
+
+## Web viewer
+
+```sh
+caliper serve                       # http://127.0.0.1:8777
+caliper serve --host 0.0.0.0 --allow-remote   # reachable from the network
+```
+
+A single-page viewer over the same SQLite database: runs, per-category scores,
+performance, memory and loading behaviour, an attempt browser showing every
+raw response, thinking text and tool call, and a cross-run comparison that
+states whether the runs are actually comparable. Live GPU telemetry and the
+progress of any executing run appear in the header, because attempts are
+committed as they complete.
+
+It also carries the **rubric grading queue**. Rubric tasks have no automatic
+score by design; the queue shows each response beside its criteria with a
+checkbox per criterion, and the score is stored in its own table where an
+automatic re-grade cannot touch it.
+
+The viewer cannot start, stop or configure a benchmark. Runs are launched from
+the CLI, where preflight and serial execution are enforced; a browser button
+would invite two people starting runs on one GPU. Recording a manual grade is
+the only write it performs.
+
+**Exposure.** `caliper serve` binds loopback and refuses any other address
+unless `--allow-remote` is passed, because the viewer has no authentication and
+serves machine telemetry, model inventory and raw model output. Over loopback,
+reach it from elsewhere with `ssh -L 8777:127.0.0.1:8777 <host>`. If you do
+bind outward, note that `0.0.0.0` covers every interface — including a VPN
+such as Tailscale, not just the local subnet — and put a reverse proxy with
+authentication in front of it if the network is not trusted.
+
+## Re-grading without re-running
+
+Grading is a pure function of the validator and the stored response, so a
+corrected validator does not require new inference:
+
+```sh
+caliper regrade --run <id> --dry-run    # report what would change
+caliper regrade --run <id>              # apply
+```
+
+Measurements are never altered. Manual rubric scores are in a separate table
+and survive a re-grade.
 
 ## Configuration
 
@@ -153,8 +200,12 @@ is not ground truth.
 - [docs/GRADING.md](docs/GRADING.md) — manual rubric grading procedure
 - [docs/CANDIDATES.md](docs/CANDIDATES.md) — model candidate analysis and the
   proposed experiment order for this host
+- [docs/API.md](docs/API.md) — the HTTP API and the stable Python API for
+  other programs and agents
 - [docs/ROADMAP.md](docs/ROADMAP.md) — what is not built yet, including the
   vLLM comparison plan
+- [CLAUDE.md](CLAUDE.md) — working agreement for coding agents: invariants,
+  metric definitions, and the mistakes already made once
 
 ## Development
 

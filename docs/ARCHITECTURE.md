@@ -16,6 +16,10 @@
 | Storage | `caliper/storage.py` | SQLite schema and access |
 | Reporting | `caliper/report.py` | Aggregation, workload profiles, Markdown |
 | Export | `caliper/export.py` | JSON and CSV |
+| Re-grading | `caliper/regrade.py` | Re-score stored responses, no inference |
+| Web API | `caliper/webapi.py` | JSON handlers as pure functions of (Store, params) |
+| Web server | `caliper/server.py` | Routing and serialisation on `http.server` |
+| Viewer | `caliper/web/index.html` | Single-page viewer and grading queue |
 | CLI | `caliper/cli.py` | Command surface |
 
 Dependencies point one way: `cli` → `runner`/`report` → `backends`/`evals`/
@@ -50,6 +54,9 @@ runs           one row per benchmark run: identity, engine version, machine
                snapshot, full run configuration, preflight result, status
   run_models   one row per (run, model): digest, size, quantization,
                architecture, MoE flag, context capability, GPU/CPU residency
+  manual_scores one row per hand-graded attempt: score, criteria, grader,
+               notes, timestamp - separate from attempts so an automatic
+               re-grade can never destroy human work
   attempts     one row per (run, model, task, repetition), warmups included
                and flagged: engine timings, client timings, token counts,
                telemetry summary, score, validator detail, raw response,
@@ -79,6 +86,18 @@ so a fast attempt is never left with no telemetry.
 
 See [MEASUREMENT.md](MEASUREMENT.md) for what each field means.
 
+## The viewer
+
+`webapi.py` holds every handler as a plain function of `(Store, params)`, so
+the API is tested without opening a socket; `server.py` only routes and
+serialises. The viewer is read-only except for manual rubric grades, and
+neither module imports the runner — a test asserts that, so the inability to
+launch inference from a browser is structural rather than a matter of which
+routes happen to exist.
+
+Live progress needs no machinery: attempts are committed as they complete (for
+interruption safety), so polling the database shows an executing run advancing.
+
 ## Internal API for other projects
 
 Nexus, Trykode or anything else should consume Caliper through these stable
@@ -105,6 +124,5 @@ functions give a consumer what it needs to decide; the decision stays outside.
 - No LLM judge.
 - No model downloading, pulling or pruning.
 - No service management.
-- No web interface.
 - No automatic routing.
 - No plugin system.

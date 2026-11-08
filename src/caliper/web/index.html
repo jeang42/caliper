@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caliper</title>
+<style>
+  :root {
+    --bg: #11131a; --panel: #181b24; --panel-2: #1f2330; --line: #2b3040;
+    --text: #e6e8ee; --dim: #9aa2b4; --accent: #6aa6ff; --good: #5fcf80;
+    --warn: #e8b04b; --bad: #e8685d; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f7f9; --panel: #fff; --panel-2: #eef0f4; --line: #d8dce4;
+      --text: #1a1d24; --dim: #5c6472; --accent: #1b63d6; --good: #1d7f3c;
+      --warn: #96650a; --bad: #b4332a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { position: sticky; top: 0; z-index: 10; background: var(--panel);
+           border-bottom: 1px solid var(--line); padding: 10px 16px;
+           display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+  h1 small { color: var(--dim); font-weight: 400; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  button, select, input { font: inherit; color: var(--text); background: var(--panel-2);
+           border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .tile .k { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  .tile .v { font-size: 22px; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+            padding: 14px; margin: 14px 0; }
+  section > h2 { font-size: 14px; margin: 0 0 10px; text-transform: uppercase;
+                 letter-spacing: .07em; color: var(--dim); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; font-size: 12px; text-transform: uppercase;
+       letter-spacing: .04em; }
+  tbody tr:hover { background: var(--panel-2); }
+  code, .mono { font-family: var(--mono); font-size: 13px; }
+  pre { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+        padding: 10px; overflow: auto; max-height: 420px; white-space: pre-wrap;
+        word-break: break-word; font-family: var(--mono); font-size: 13px; margin: 6px 0; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+          border: 1px solid var(--line); background: var(--panel-2); }
+  .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .dim { color: var(--dim); }
+  .note { background: var(--panel-2); border-left: 3px solid var(--warn);
+          padding: 8px 12px; border-radius: 0 8px 8px 0; margin: 10px 0; font-size: 14px; }
+  .clickable { cursor: pointer; }
+  .clickable:hover td:first-child { color: var(--accent); }
+  .live { width: 8px; height: 8px; border-radius: 50%; background: var(--good);
+          display: inline-block; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .bar { height: 6px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .crit { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; }
+  .crit input { margin-top: 4px; }
+  .split { display: grid; gap: 14px; grid-template-columns: 1fr; }
+  @media (min-width: 1000px) { .split { grid-template-columns: 1fr 1fr; } }
+  .scroll { overflow-x: auto; }
+  footer { color: var(--dim); font-size: 12px; padding: 20px 16px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Caliper <small id="ver"></small></h1>
+  <nav>
+    <button data-view="runs" class="on">Runs</button>
+    <button data-view="grading">Grading</button>
+    <button data-view="compare">Compare</button>
+  </nav>
+  <div class="row" style="margin-left:auto" id="livebox"></div>
+</header>
+<main id="main">Loading…</main>
+<footer>
+  Read-only viewer. Benchmarks are launched from the CLI, where preflight and
+  serial execution are enforced. Manual rubric grades are the only thing this
+  page writes.
+</footer>
+
+<script>
+"use strict";
+const $ = (sel, el = document) => el.querySelector(sel);
+const main = $("#main");
+const state = { view: "runs", runId: null, attemptId: null, filters: {}, compare: [] };
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({ error: `${res.status} ${res.statusText}` }));
+  if (!res.ok) throw new Error(data.error || `request failed: ${res.status}`);
+  return data;
+}
+
+const num = (v, nd = 2) => (v === null || v === undefined ? "—" : Number(v).toFixed(nd));
+const pct = (v) => (v === null || v === undefined ? "—" : `${Math.round(v)}%`);
+const gib = (mib) => (mib === null || mib === undefined ? "—" : `${(mib / 1024).toFixed(1)} GiB`);
+function stat(s, nd = 1, unit = "") {
+  if (!s || s.mean === null || s.mean === undefined) return "—";
+  const spread = s.n > 1 && s.stdev !== null ? ` <span class="dim">±${Number(s.stdev).toFixed(nd)}</span>` : "";
+  return `${Number(s.mean).toFixed(nd)}${unit}${spread}`;
+}
+function scoreCell(mean, n) {
+  if (mean === null || mean === undefined) return '<span class="dim">n/a</span>';
+  const cls = mean >= 0.85 ? "good" : mean >= 0.5 ? "warn" : "bad";
+  return `<span class="${cls}">${mean.toFixed(2)}</span> <span class="dim">(n=${n})</span>`;
+}
+
+// ---------------------------------------------------------------- live bar
+async function refreshLive() {
+  try {
+    const s = await api("/api/status");
+    const g = s.gpu;
+    let html = "";
+    if (g) {
+      const memPct = g.memory_total_mib ? (g.memory_used_mib / g.memory_total_mib) * 100 : 0;
+      html += `<span class="pill" title="${esc(g.name)}">GPU ${pct(g.utilization_pct)}</span>
+               <span class="pill">${gib(g.memory_used_mib)} / ${gib(g.memory_total_mib)} (${Math.round(memPct)}%)</span>
+               <span class="pill">${num(g.temperature_c, 0)} °C</span>`;
+    } else {
+      html += `<span class="pill dim">no GPU telemetry</span>`;
+    }
+    if (s.active_run) {
+      const a = s.active_run;
+      const of = a.attempts_expected ? ` / ${a.attempts_expected}` : "";
+      html += `<span class="pill"><span class="live"></span> running
+               <a href="#" data-run="${esc(a.run_id)}">${esc(a.run_id.slice(0, 8))}</a>
+               ${a.attempts_done}${of}</span>`;
+    }
+    $("#livebox").innerHTML = html;
+    const link = $("#livebox a");
+    if (link) link.onclick = (e) => { e.preventDefault(); openRun(link.dataset.run); };
+  } catch (err) {
+    $("#livebox").innerHTML = `<span class="pill bad">${esc(err.message)}</span>`;
+  }
+}
+
+// ------------------------------------------------------------------- runs
+async function viewRuns() {
+  const { runs, caliper_version } = await api("/api/runs");
+  $("#ver").textContent = `v${caliper_version}`;
+  if (!runs.length) {
+    main.innerHTML = `<section><h2>Runs</h2><p class="dim">No runs stored yet. Run
+      <code>caliper run --dry-run</code> or <code>./scripts/benchmark-stage.sh 1</code>.</p></section>`;
+    return;
+  }
+  const rows = runs.map((r) => `
+    <tr class="clickable" data-run="${esc(r.id)}">
+      <td><code>${esc(r.id.slice(0, 8))}</code>${r.running ? ' <span class="live"></span>' : ""}</td>
+      <td>${esc(r.label || "")}</td>
+      <td>${esc(r.created_at || "").replace("T", " ").replace("+00:00", "")}</td>
+      <td>${esc(r.engine)} <span class="dim">${esc(r.engine_version || "")}</span></td>
+      <td>${r.models.map((m) => `<code>${esc(m)}</code>`).join("<br>") || '<span class="dim">—</span>'}</td>
+      <td><code>${esc(r.suite)}@${esc(r.suite_version)}</code></td>
+      <td>${r.attempts}${r.failures ? ` <span class="bad">(${r.failures} failed)</span>` : ""}</td>
+      <td>${r.dry_run ? '<span class="pill warn">dry run</span>' : `<span class="pill">${esc(r.status)}</span>`}</td>
+    </tr>`).join("");
+  main.innerHTML = `<section><h2>Runs</h2><div class="scroll"><table>
+    <thead><tr><th>Run</th><th>Label</th><th>Started (UTC)</th><th>Engine</th>
+    <th>Models</th><th>Suite</th><th>Attempts</th><th>Status</th></tr></thead>
+    <tbody>${rows}</tbody></table></div></section>`;
+  main.querySelectorAll("tr[data-run]").forEach((tr) => {
+    tr.onclick = () => openRun(tr.dataset.run);
+  });
+}
+
+// --------------------------------------------------------------- run detail
+async function openRun(runId) {
+  state.view = "run"; state.runId = runId;
+  setNav(null);
+  main.innerHTML = "Loading run…";
+  const d = await api(`/api/runs/${encodeURIComponent(runId)}`);
+  const run = d.run, models = d.models;
+  const cats = [...new Set(models.flatMap((m) => Object.keys(m.categories)))].sort();
+
+  const dry = run.dry_run
+    ? `<div class="note"><strong>Dry run.</strong> Responses came from the mock backend.
+       These are not measurements of any real model.</div>` : "";
+
+  const quality = `<div class="scroll"><table>
+    <thead><tr><th>Model</th>${cats.map((c) => `<th>${esc(c)}</th>`).join("")}
+      <th>pending manual</th><th>no output</th><th>grading errors</th></tr></thead>
+    <tbody>${models.map((m) => {
+      const pend = Object.values(m.categories).reduce((a, c) => a + c.pending_manual, 0);
+      const noout = Object.values(m.categories).reduce((a, c) => a + c.no_output, 0);
+      const gerr = Object.values(m.categories).reduce((a, c) => a + c.grading_errors, 0);
+      return `<tr><td><code>${esc(m.model)}</code></td>${cats.map((c) => {
+        const cs = m.categories[c];
+        return `<td>${cs ? scoreCell(cs.mean_score, cs.graded_attempts) : '<span class="dim">n/a</span>'}</td>`;
+      }).join("")}<td>${pend}</td><td>${noout ? `<span class="warn">${noout}</span>` : 0}</td>
+      <td>${gerr ? `<span class="bad">${gerr}</span>` : 0}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+
+  const anyManual = models.some((m) => Object.values(m.categories).some((c) => c.manual_graded));
+  const manual = anyManual ? `<section><h2>Manually graded (rubric)</h2>
+    <p class="dim">Human scores, kept separate from the automatic means because they
+    come from a different process.</p><div class="scroll"><table>
+    <thead><tr><th>Model</th>${cats.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+    <tbody>${models.map((m) => `<tr><td><code>${esc(m.model)}</code></td>${cats.map((c) => {
+      const cs = m.categories[c];
+      return `<td>${cs && cs.manual_mean_score !== null
+        ? scoreCell(cs.manual_mean_score, cs.manual_graded) : '<span class="dim">—</span>'}</td>`;
+    }).join("")}</tr>`).join("")}</tbody></table></div></section>` : "";
+
+  const perf = `<div class="scroll"><table>
+    <thead><tr><th>Model</th><th>output tok/s</th><th>prompt tok/s</th><th>TTFT s</th>
+    <th>latency s</th><th>truncated</th><th>cached prompts</th><th>reliability</th></tr></thead>
+    <tbody>${models.map((m) => {
+      const p = m.performance;
+      const rel = m.reliability === null ? "—" : `${Math.round(m.reliability * 100)}%`;
+      return `<tr><td><code>${esc(m.model)}</code></td>
+        <td>${stat(p.output_tokens_per_s, 1)}</td><td>${stat(p.prompt_tokens_per_s, 0)}</td>
+        <td>${stat(p.ttft_s, 2)}</td><td>${stat(p.total_latency_s, 1)}</td>
+        <td>${m.truncated ? `<span class="warn">${m.truncated}/${m.attempts}</span>` : `0/${m.attempts}`}</td>
+        <td>${m.prompt_cache_hits}/${m.attempts}</td>
+        <td>${m.errors ? `<span class="bad">${rel}</span>` : `<span class="good">${rel}</span>`}</td></tr>`;
+    }).join("")}</tbody></table></div>
+    <p class="dim">Output tokens include a thinking model's reasoning tokens. TTFT and
+    latency exclude attempts that had to reload the model.</p>`;
+
+  const mem = `<div class="scroll"><table>
+    <thead><tr><th>Model</th><th>size</th><th>peak GPU</th><th>cold load</th>
+    <th>weights to GPU</th><th>reloads</th><th>reload cost</th><th>residency</th></tr></thead>
+    <tbody>${models.map((m) => {
+      const p = m.performance, t = m.telemetry, r = m.residency;
+      const res = r && r.gpu_fraction !== null
+        ? `${Math.round(r.gpu_fraction * 100)}% on GPU${r.fully_on_gpu ? "" : " (offloaded)"}`
+        : '<span class="dim">unknown</span>';
+      return `<tr><td><code>${esc(m.model)}</code></td>
+        <td>${m.size_gib ? m.size_gib.toFixed(2) + " GiB" : "—"}</td>
+        <td>${stat(t.gpu_mem_peak_mib, 0, " MiB")}</td>
+        <td>${stat(p.cold_load_s, 2, " s")}</td>
+        <td>${stat(p.cold_load_gpu_mem_mib, 0, " MiB")}</td>
+        <td>${m.reloads ? `<span class="warn">${m.reloads}</span>` : 0}</td>
+        <td>${stat(p.reload_s, 1, " s")}</td><td>${res}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+
+  const profiles = d.profiles.map((p) => `
+    <div class="tile">
+      <div class="k">${esc(p.label)}</div>
+      ${p.ranking.slice(0, 3).map((r, i) => `<div style="margin-top:6px">
+        ${i + 1}. <code>${esc(r.model)}</code>
+        <span class="dim">${r.composite.toFixed(3)}</span></div>`).join("")}
+      ${p.unmeasured_categories.length
+        ? `<div class="dim" style="margin-top:8px;font-size:12px">Partial: ${
+            esc(p.unmeasured_categories.join(", "))} not measured in this run</div>` : ""}
+    </div>`).join("");
+
+  main.innerHTML = `
+    <div class="row">
+      <button id="back">&larr; Runs</button>
+      <button id="tograding">Grade rubric tasks</button>
+      <button id="tocompare">Add to comparison</button>
+    </div>
+    <section><h2>Run <code>${esc(run.id)}</code></h2>${dry}
+      <div class="tiles">
+        <div class="tile"><div class="k">Engine</div><div class="v">${esc(run.engine)}</div>
+          <div class="dim">${esc(run.engine_version || "")}</div></div>
+        <div class="tile"><div class="k">Suite</div><div class="v">${esc(run.suite_version)}</div>
+          <div class="dim">${esc(run.suite)}</div></div>
+        <div class="tile"><div class="k">Status</div><div class="v">${esc(run.status)}</div>
+          <div class="dim">${esc(run.hostname || "")}</div></div>
+        <div class="tile"><div class="k">Attempts</div><div class="v">${d.progress.attempts}</div>
+          <div class="dim">${d.progress.failures} failed</div></div>
+      </div>
+      <p class="dim" style="margin-top:10px">${esc(run.label || "")} ·
+        started ${esc((run.created_at || "").replace("T", " "))}</p>
+    </section>
+    <section><h2>Quality by category</h2>${quality}</section>
+    ${manual}
+    <section><h2>Performance</h2>${perf}</section>
+    <section><h2>Memory, loading and residency</h2>${mem}</section>
+    <section><h2>Recommendations by workload</h2><div class="tiles">${profiles}</div>
+      <p class="dim">Composites mix absolute category scores with speed, latency and
+      memory normalised across the models in this run, so they are not comparable
+      across different model sets.</p></section>
+    <section><h2>Attempts</h2><div id="attempts">Loading…</div></section>`;
+
+  $("#back").onclick = () => show("runs");
+  $("#tograding").onclick = () => openGrading(runId);
+  $("#tocompare").onclick = () => {
+    if (!state.compare.includes(runId)) state.compare.push(runId);
+    show("compare");
+  };
+  loadAttempts(runId);
+}
+
+async function loadAttempts(runId, filters = {}) {
+  const q = new URLSearchParams(filters);
+  const d = await api(`/api/runs/${encodeURIComponent(runId)}/attempts?${q}`);
+  const models = [...new Set(d.attempts.map((a) => a.model))];
+  const cats = [...new Set(d.attempts.map((a) => a.category))];
+  const el = $("#attempts");
+  el.innerHTML = `
+    <div class="row" style="margin-bottom:10px">
+      <select id="fmodel"><option value="">all models</option>
+        ${models.map((m) => `<option ${filters.model === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>
+      <select id="fcat"><option value="">all categories</option>
+        ${cats.map((c) => `<option ${filters.category === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+      <select id="fgraded"><option value="">any grading</option>
+        ${["automatic", "manual_rubric", "no_output", "skipped", "error"].map((g) =>
+          `<option ${filters.graded === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select>
+      <label class="dim"><input type="checkbox" id="fwarm" ${filters.warmup ? "checked" : ""}> show warmups</label>
+      <span class="dim">${d.count} attempts</span>
+    </div>
+    <div class="scroll"><table>
+      <thead><tr><th>Model</th><th>Task</th><th>Rep</th><th>Score</th><th>tok/s</th>
+      <th>TTFT</th><th>out</th><th>stop</th><th>Detail</th></tr></thead>
+      <tbody>${d.attempts.map((a) => `
+        <tr class="clickable" data-attempt="${a.id}">
+          <td><code>${esc(a.model)}</code></td>
+          <td><code>${esc(a.task_id)}</code>${a.is_warmup ? ' <span class="pill dim">warmup</span>' : ""}</td>
+          <td>${a.repetition}</td>
+          <td>${a.manual_score
+              ? `<span class="pill">manual ${a.manual_score.score}/${a.manual_score.max_score}</span>`
+              : a.score === null ? `<span class="dim">${esc(a.graded)}</span>`
+              : scoreCell(a.score, 1)}</td>
+          <td>${num(a.output_tokens_per_s, 1)}</td><td>${num(a.ttft_s, 3)}</td>
+          <td>${a.output_tokens ?? "—"}</td>
+          <td>${a.truncated ? '<span class="warn">length</span>' : esc(a.done_reason || "—")}</td>
+          <td class="dim" style="max-width:320px">${esc((a.score_detail || "").slice(0, 90))}</td>
+        </tr>`).join("")}</tbody></table></div>`;
+  const reload = () => loadAttempts(runId, {
+    model: $("#fmodel").value, category: $("#fcat").value,
+    graded: $("#fgraded").value, warmup: $("#fwarm").checked ? "1" : "",
+  });
+  $("#fmodel").onchange = reload; $("#fcat").onchange = reload;
+  $("#fgraded").onchange = reload; $("#fwarm").onchange = reload;
+  el.querySelectorAll("tr[data-attempt]").forEach((tr) => {
+    tr.onclick = () => openAttempt(Number(tr.dataset.attempt));
+  });
+}
+
+// ----------------------------------------------------------- attempt detail
+async function openAttempt(attemptId) {
+  const d = await api(`/api/attempts/${attemptId}`);
+  const a = d.attempt, task = d.task;
+  const t = a.telemetry || {};
+  main.innerHTML = `
+    <div class="row"><button id="back">&larr; Run</button></div>
+    <section><h2><code>${esc(a.task_id)}</code> · <code>${esc(a.model)}</code> · rep ${a.repetition}</h2>
+      <div class="tiles">
+        <div class="tile"><div class="k">Score</div><div class="v">${
+          a.score === null ? esc(a.graded) : a.score}</div>
+          <div class="dim">${esc(a.validator || "")}</div></div>
+        <div class="tile"><div class="k">Output tok/s</div><div class="v">${num(a.output_tokens_per_s, 1)}</div>
+          <div class="dim">${a.output_tokens ?? "—"} tokens</div></div>
+        <div class="tile"><div class="k">TTFT</div><div class="v">${num(a.ttft_s, 3)} s</div>
+          <div class="dim">${esc(a.ttft_source || "")}</div></div>
+        <div class="tile"><div class="k">Stop reason</div><div class="v">${esc(a.done_reason || "—")}</div>
+          <div class="dim">${a.truncated ? "truncated" : "completed"}</div></div>
+        <div class="tile"><div class="k">Peak GPU</div><div class="v">${
+          t.gpu_mem_used_peak_mib ? Math.round(t.gpu_mem_used_peak_mib) + " MiB" : "—"}</div>
+          <div class="dim">util ${pct(t.gpu_util_mean_pct)}</div></div>
+      </div>
+      <p class="dim" style="margin-top:10px">${esc(a.score_detail || "")}</p>
+      <p class="dim">Options: <code>${esc(JSON.stringify(a.options))}</code></p>
+    </section>
+    ${a.error ? `<div class="note bad">Generation failed: ${esc(a.error)}</div>` : ""}
+    <div class="split">
+      <section><h2>Prompt${task && task.filler_tokens ? " (filler abbreviated)" : ""}</h2>
+        <pre>${esc(task ? abbreviate(task.prompt) : "task definition not found in the installed suite")}</pre>
+        ${task && task.system ? `<h2>System</h2><pre>${esc(task.system)}</pre>` : ""}</section>
+      <section><h2>Response</h2>
+        <pre>${a.response_text ? esc(a.response_text) : '<span class="dim">(empty)</span>'}</pre>
+        ${a.tool_calls && a.tool_calls.length
+          ? `<h2>Tool calls</h2><pre>${esc(JSON.stringify(a.tool_calls, null, 2))}</pre>` : ""}
+        ${a.thinking_text
+          ? `<h2>Thinking (${a.thinking_text.length} chars)</h2><pre>${esc(a.thinking_text)}</pre>` : ""}
+      </section>
+    </div>
+    ${task && task.manual ? gradeForm(a, task, d.manual_score) : ""}`;
+  $("#back").onclick = () => openRun(a.run_id);
+  if (task && task.manual) wireGradeForm(a.id, task);
+}
+
+function abbreviate(prompt) {
+  return prompt.replace(/\{\{FILLER\}\}/g, "\n[… generated filler document …]\n");
+}
+
+function gradeForm(a, task, existing) {
+  const prior = existing && existing.criteria_json ? JSON.parse(existing.criteria_json) : null;
+  return `<section><h2>Manual grading</h2>
+    <p class="dim">One point per criterion met. No LLM judge is used; this score is yours.</p>
+    <div id="crits">${task.criteria.map((c, i) => `
+      <label class="crit"><input type="checkbox" data-i="${i}"
+        ${prior && prior[i] && prior[i].met ? "checked" : ""}>
+        <span>${esc(c)}</span></label>`).join("")}</div>
+    ${task.signal_phrases.length ? `<p class="dim">Automatic hint only — phrases present:
+      <code>${esc(task.signal_phrases.join(", "))}</code></p>` : ""}
+    <div class="row" style="margin-top:10px">
+      <input id="grader" placeholder="your name (optional)"
+        value="${esc(existing ? existing.grader || "" : "")}">
+      <input id="notes" placeholder="notes (optional)" style="flex:1"
+        value="${esc(existing ? existing.notes || "" : "")}">
+      <button id="savegrade" class="on">Save grade</button>
+      ${existing ? '<button id="delgrade">Clear</button>' : ""}
+      <span id="gradestatus" class="dim">${existing
+        ? `saved ${esc(existing.graded_at)}: ${existing.score}/${existing.max_score}` : ""}</span>
+    </div></section>`;
+}
+
+function wireGradeForm(attemptId, task) {
+  $("#savegrade").onclick = async () => {
+    const criteria = [...document.querySelectorAll("#crits input")].map((cb, i) => ({
+      text: task.criteria[i], met: cb.checked,
+    }));
+    try {
+      const r = await api("/api/grades", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          attempt_id: attemptId, criteria,
+          grader: $("#grader").value, notes: $("#notes").value,
+        }),
+      });
+      $("#gradestatus").innerHTML =
+        `<span class="good">saved ${r.score}/${r.max_score} (${(r.fraction * 100).toFixed(0)}%)</span>`;
+    } catch (err) {
+      $("#gradestatus").innerHTML = `<span class="bad">${esc(err.message)}</span>`;
+    }
+  };
+  const del = $("#delgrade");
+  if (del) del.onclick = async () => {
+    await api(`/api/grades/${attemptId}`, { method: "DELETE" });
+    $("#gradestatus").innerHTML = '<span class="dim">cleared</span>';
+    [...document.querySelectorAll("#crits input")].forEach((cb) => { cb.checked = false; });
+  };
+}
+
+// ---------------------------------------------------------------- grading
+async function openGrading(runId) {
+  state.view = "grading";
+  setNav("grading");
+  if (!runId) {
+    const { runs } = await api("/api/runs");
+    const real = runs.filter((r) => !r.dry_run);
+    if (!real.length) { main.innerHTML = `<section><p class="dim">No real runs yet.</p></section>`; return; }
+    runId = state.runId || real[0].id;
+  }
+  state.runId = runId;
+  const d = await api(`/api/runs/${encodeURIComponent(runId)}/grading`);
+  const doneFrac = d.total ? d.scored / d.total : 0;
+  main.innerHTML = `
+    <section><h2>Rubric grading queue · <code>${esc(runId)}</code></h2>
+      <div class="row"><div style="flex:1">
+        <div class="bar"><i style="width:${(doneFrac * 100).toFixed(1)}%"></i></div>
+      </div><span class="dim">${d.scored} / ${d.total} graded</span></div>
+      <p class="dim">These tasks have no automatic score by design. Click one to read the
+      response beside its criteria and record a score.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Task</th><th>Model</th><th>Rep</th><th>State</th><th>Score</th></tr></thead>
+        <tbody>${d.queue.map((q) => `
+          <tr class="clickable" data-attempt="${q.attempt_id}">
+            <td><code>${esc(q.task_id)}</code><div class="dim">${esc(q.title || "")}</div></td>
+            <td><code>${esc(q.model)}</code></td><td>${q.repetition}</td>
+            <td>${q.truncated ? '<span class="warn">no output (truncated)</span>'
+                 : q.graded === "no_output" ? '<span class="warn">no output</span>'
+                 : '<span class="pill">awaiting grade</span>'}</td>
+            <td>${q.scored ? `<span class="good">${q.score}/${q.max_score}</span>`
+                 : '<span class="dim">—</span>'}</td>
+          </tr>`).join("")}</tbody></table></div>
+    </section>`;
+  main.querySelectorAll("tr[data-attempt]").forEach((tr) => {
+    tr.onclick = () => openAttempt(Number(tr.dataset.attempt));
+  });
+}
+
+// ---------------------------------------------------------------- compare
+async function viewCompare() {
+  setNav("compare");
+  const { runs } = await api("/api/runs");
+  const chosen = state.compare;
+  const picker = `<section><h2>Compare runs</h2>
+    <p class="dim">Pick two or more runs. Caliper checks whether they are actually
+    comparable and says so rather than lining up numbers that are not.</p>
+    <div class="row">${runs.slice(0, 20).map((r) => `
+      <label class="pill clickable"><input type="checkbox" data-run="${esc(r.id)}"
+        ${chosen.includes(r.id) ? "checked" : ""}> ${esc(r.id.slice(0, 8))}
+        ${esc(r.label || r.engine)}${r.dry_run ? " (dry)" : ""}</label>`).join("")}
+    </div></section><div id="cmp"></div>`;
+  main.innerHTML = picker;
+  main.querySelectorAll("input[data-run]").forEach((cb) => {
+    cb.onchange = () => {
+      const id = cb.dataset.run;
+      state.compare = cb.checked
+        ? [...new Set([...state.compare, id])] : state.compare.filter((x) => x !== id);
+      viewCompare();
+    };
+  });
+  if (chosen.length < 1) return;
+  const q = new URLSearchParams(); chosen.forEach((id) => q.append("run", id));
+  const d = await api(`/api/compare?${q}`);
+  const cats = [...new Set(d.runs.flatMap((e) => e.models.flatMap((m) => Object.keys(m.categories))))].sort();
+  $("#cmp").innerHTML = `
+    ${d.warnings.map((w) => `<div class="note"><strong>Not comparable:</strong> ${esc(w)}</div>`).join("")}
+    ${d.comparable ? '<div class="note" style="border-color:var(--good)">These runs are comparable: same engine version, same suite version, same model digests.</div>' : ""}
+    <section><h2>Category scores</h2><div class="scroll"><table>
+      <thead><tr><th>Run</th><th>Model</th>${cats.map((c) => `<th>${esc(c)}</th>`).join("")}
+        <th>output tok/s</th><th>TTFT s</th></tr></thead>
+      <tbody>${d.runs.flatMap((e) => e.models.map((m) => `
+        <tr><td><code>${esc(e.run.id.slice(0, 8))}</code><div class="dim">${esc(e.run.label || "")}</div></td>
+          <td><code>${esc(m.model)}</code></td>
+          ${cats.map((c) => { const cs = m.categories[c];
+            return `<td>${cs ? scoreCell(cs.mean_score, cs.graded_attempts) : '<span class="dim">—</span>'}</td>`;
+          }).join("")}
+          <td>${stat(m.performance.output_tokens_per_s, 1)}</td>
+          <td>${stat(m.performance.ttft_s, 2)}</td></tr>`)).join("")}
+      </tbody></table></div></section>`;
+}
+
+// -------------------------------------------------------------------- shell
+function setNav(view) {
+  document.querySelectorAll("nav button").forEach((b) => {
+    b.classList.toggle("on", b.dataset.view === view);
+  });
+}
+
+async function show(view) {
+  state.view = view; setNav(view);
+  try {
+    if (view === "runs") await viewRuns();
+    else if (view === "grading") await openGrading(state.runId);
+    else if (view === "compare") await viewCompare();
+  } catch (err) {
+    main.innerHTML = `<div class="note bad">${esc(err.message)}</div>`;
+  }
+}
+
+document.querySelectorAll("nav button").forEach((b) => {
+  b.onclick = () => show(b.dataset.view);
+});
+
+show("runs");
+refreshLive();
+setInterval(refreshLive, 3000);
+setInterval(() => {
+  // Keep an executing run's attempt table fresh without disturbing a scroll
+  // position elsewhere in the page.
+  if (state.view === "runs") viewRuns().catch(() => {});
+}, 10000);
+</script>
+</body>
+</html>

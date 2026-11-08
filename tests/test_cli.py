@@ -143,3 +143,61 @@ def test_version(capsys):
         main(["--version"])
     assert exc.value.code == 0
     assert "caliper" in capsys.readouterr().out
+
+
+def test_serve_refuses_a_non_loopback_bind_without_the_flag(capsys, tmp_path, monkeypatch):
+    """The viewer has no authentication, so binding outward must be explicit."""
+    monkeypatch.setenv("CALIPER_HOME", str(tmp_path / "data"))
+    main(
+        [
+            "run",
+            "--dry-run",
+            "--model",
+            "mock-small:1b",
+            "--task",
+            "instruction.exact_format",
+            "--repetitions",
+            "1",
+            "--warmup",
+            "0",
+        ]
+    )
+    capsys.readouterr()
+    assert main(["serve", "--host", "0.0.0.0"]) == 2
+    err = capsys.readouterr().err
+    assert "refusing to bind" in err
+    assert "ssh -L" in err
+
+
+def test_serve_without_a_database_explains_rather_than_starting(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("CALIPER_HOME", str(tmp_path / "empty"))
+    assert main(["serve"]) == 2
+    assert "no database" in capsys.readouterr().err
+
+
+def test_regrade_cli_reports_changes(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("CALIPER_HOME", str(tmp_path / "data"))
+    main(
+        [
+            "run",
+            "--dry-run",
+            "--model",
+            "mock-small:1b",
+            "--category",
+            "instruction_following",
+            "--repetitions",
+            "1",
+            "--warmup",
+            "0",
+        ]
+    )
+    capsys.readouterr()
+    assert main(["regrade", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "re-graded" in out
+    assert "nothing was written" in out
+
+
+def test_regrade_without_runs_exits_nonzero(capsys):
+    assert main(["regrade"]) == 2
+    assert "no runs stored yet" in capsys.readouterr().err

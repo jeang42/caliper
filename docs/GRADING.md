@@ -15,7 +15,27 @@ No LLM judge is used. An LLM judge is neither objective nor reliably accurate,
 and treating one as ground truth would make the whole suite's quality numbers
 unfalsifiable.
 
-## Procedure
+## Procedure (web viewer)
+
+```sh
+caliper serve
+```
+
+Open the viewer, pick a run, and press **Grade rubric tasks** — or go straight
+to the Grading tab. The queue lists every rubric attempt with a progress bar.
+Clicking one shows the prompt, the response, the thinking text and the tool
+calls beside the task's criteria, with a checkbox per criterion. The score is
+points met over points available.
+
+Scores are stored in a `manual_scores` table keyed by attempt, separate from
+the automatic scores, so `caliper regrade` cannot overwrite human work. They
+appear in reports as their own table, never merged into the automatic means.
+
+An attempt marked **no output** is one where the model emitted nothing to
+grade, usually a thinking model that spent its whole token budget. Grade it
+against the criteria as you would any other response: nothing met.
+
+## Procedure (by hand, without the viewer)
 
 1. Export the run with responses included:
 
@@ -35,10 +55,13 @@ unfalsifiable.
    produced them. Grade all responses to one task before moving to the next,
    so the standard stays fixed within a task.
 
-5. Record the scores outside the attempts table — a CSV keyed by
-   `(run_id, model, task_id, repetition)` is enough — and keep it with the run.
-   Caliper does not yet write manual scores back into the database; see
-   [ROADMAP.md](ROADMAP.md).
+5. Record each score with the API, which is what the viewer calls:
+
+   ```sh
+   curl -X POST http://127.0.0.1:8777/api/grades \
+     -H 'Content-Type: application/json' \
+     -d '{"attempt_id": 287, "criteria": [{"text":"...","met":true}], "grader": "you"}'
+   ```
 
 ## Rules
 

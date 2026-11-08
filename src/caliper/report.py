@@ -91,6 +91,8 @@ class CategoryScore:
     grading_errors: int
     no_output: int
     tasks: int
+    manual_mean_score: float | None = None
+    manual_graded: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +105,8 @@ class CategoryScore:
             "grading_errors": self.grading_errors,
             "no_output": self.no_output,
             "tasks": self.tasks,
+            "manual_mean_score": self.manual_mean_score,
+            "manual_graded": self.manual_graded,
         }
 
 
@@ -380,6 +384,7 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
         raise KeyError(f"no such run: {run_id}")
     rows = store.attempts(run_id)
     model_meta = {r["model"]: r for r in store.run_models(run_id)}
+    manual = store.manual_scores(run_id)
 
     by_model: dict[str, list[Any]] = {}
     for row in rows:
@@ -469,6 +474,11 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
                 for a in cat_attempts
                 if a["graded"] == "automatic" and a["score"] is not None
             ]
+            manual_values = [
+                manual[a["id"]]["score"] / manual[a["id"]]["max_score"]
+                for a in cat_attempts
+                if a["id"] in manual and manual[a["id"]]["max_score"]
+            ]
             summary.categories[cat] = CategoryScore(
                 category=cat,
                 mean_score=statistics.fmean(graded) if graded else None,
@@ -479,6 +489,8 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
                 grading_errors=sum(1 for a in cat_attempts if a["graded"] == "error"),
                 no_output=sum(1 for a in cat_attempts if a["graded"] == "no_output"),
                 tasks=len({a["task_id"] for a in cat_attempts}),
+                manual_mean_score=statistics.fmean(manual_values) if manual_values else None,
+                manual_graded=len(manual_values),
             )
         summaries.append(summary)
 
@@ -596,6 +608,28 @@ def render_markdown(summary: dict[str, Any]) -> str:
             + " | ".join(cells)
             + f" | {pending} | {no_output} | {skipped} | {grading_errors} |"
         )
+    if any(c.manual_graded for s in summaries for c in s.categories.values()):
+        add("")
+        add("### Manually graded tasks")
+        add("")
+        add(
+            "Rubric scores entered by a human, as a fraction of the criteria met. "
+            "These are kept in a separate table rather than merged into the "
+            "automatic means, because they come from a different process and "
+            "should not be mistaken for a validator's output."
+        )
+        add("")
+        add("| Model | " + " | ".join(cats) + " |")
+        add("|---" * (len(cats) + 1) + "|")
+        for s in summaries:
+            cells = []
+            for cat in cats:
+                cs = s.categories.get(cat)
+                if cs is None or cs.manual_mean_score is None:
+                    cells.append("-")
+                else:
+                    cells.append(f"{cs.manual_mean_score:.2f} (n={cs.manual_graded})")
+            add(f"| `{s.model}` | " + " | ".join(cells) + " |")
     if any(s.no_output for s in summaries):
         add("")
         add(
