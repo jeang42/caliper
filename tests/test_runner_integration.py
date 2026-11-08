@@ -317,3 +317,46 @@ def test_real_suite_loads_and_every_validator_kind_is_known():
     assert suite.tasks
     for task in suite.tasks:
         assert task.validator["kind"] in known, task.id
+
+
+def test_cli_token_override_beats_a_task_budget():
+    """An explicitly requested budget must win over the suite's own default."""
+    settings = RunSettings(models=["m"], max_output_tokens=512, max_output_tokens_override=4096)
+    task = Task(
+        id="x",
+        category="coding",
+        title="x",
+        prompt="p",
+        validator={"kind": "exact", "expected": "y"},
+        max_output_tokens=1536,
+        context_length=16384,
+    )
+    options = build_options(settings, task)
+    assert options["num_predict"] == 4096
+    assert options["num_ctx"] == 16384  # untouched without its own override
+
+
+def test_task_budget_still_wins_without_an_override():
+    settings = RunSettings(models=["m"], max_output_tokens=512)
+    task = Task(
+        id="x",
+        category="coding",
+        title="x",
+        prompt="p",
+        validator={"kind": "exact", "expected": "y"},
+        max_output_tokens=1536,
+    )
+    assert build_options(settings, task)["num_predict"] == 1536
+
+
+def test_context_override_applies_to_every_task():
+    settings = RunSettings(models=["m"], context_length=8192, context_length_override=65536)
+    task = Task(
+        id="x",
+        category="long_context",
+        title="x",
+        prompt="p",
+        validator={"kind": "exact", "expected": "y"},
+        context_length=16384,
+    )
+    assert build_options(settings, task)["num_ctx"] == 65536

@@ -235,3 +235,41 @@ def test_python_cases_still_detects_wrong_values():
     }
     score = validators.grade(spec, res("```python\ndef f(): return [('a', 2)]\n```"))
     assert score.score == 0.0
+
+
+def test_empty_output_fails_even_a_negative_constraint():
+    """Regression: `[^e]*` matches the empty string, so an empty response
+    used to score full marks on a "do not use the letter e" task."""
+    spec = {"kind": "regex_all", "patterns": [r"(?si)\A[^e]*\Z"]}
+    score = validators.grade(spec, res(""))
+    assert score.score == 0.0
+    assert score.passed is False
+    assert "no visible output" in score.detail
+
+
+def test_truncated_empty_output_says_why():
+    result = GenerationResult(
+        model="m",
+        engine="mock",
+        text="",
+        thinking="a long internal monologue that used up the whole budget",
+        raw_final={"done_reason": "length"},
+    )
+    score = validators.grade({"kind": "exact", "expected": "x"}, result)
+    assert score.score == 0.0
+    assert "token limit" in score.detail
+
+
+def test_thinking_alone_is_not_visible_output():
+    result = GenerationResult(model="m", engine="mock", text="   ", thinking="reasoning")
+    assert result.has_visible_output is False
+    assert validators.grade({"kind": "contains_all", "needles": ["x"]}, result).score == 0.0
+
+
+def test_a_tool_call_counts_as_visible_output():
+    result = GenerationResult(
+        model="m", engine="mock", text="", tool_calls=[{"function": {"name": "f"}}]
+    )
+    assert result.has_visible_output is True
+    score = validators.grade({"kind": "tool_call", "expected_function": "f"}, result)
+    assert score.passed is True

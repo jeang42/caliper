@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.1 — 2026-11-08
+
+First real measurements taken (stage 1 smoke test, `gpt-oss:20b`). The run
+exposed three defects, all fixed here, plus one genuine model finding.
+
+- **Empty output no longer scores full marks.** Negative-constraint and
+  lookahead patterns match the empty string, so a response that was never
+  emitted used to pass. Any attempt with no visible output now scores zero,
+  with the reason recorded. This changed the stage 1 instruction-following
+  score from a false 0.88 to an honest 0.50.
+- **Truncation is tracked.** `done_reason` and `truncated` are stored per
+  attempt (schema version 2, with migration) and surfaced in the report.
+- **Cold load is reported.** Model load time and the VRAM the weights occupy
+  come from the warmup attempt, which is excluded from all other aggregates,
+  so cold-start cost was previously invisible.
+- **Profiles no longer invent composites.** A workload profile that weights
+  categories a run did not measure drops them and says so, instead of scoring
+  them zero.
+- `--max-tokens` and `--context` are now true overrides that beat a task's own
+  budget; previously they were silently ignored for every task in the suite.
+- Fixed `describe_model` dropping a model's on-disk size.
+- Suite bumped to 1.1.0: per-task output budgets raised so a thinking model's
+  reasoning tokens do not consume the answer. Versioning policy documented.
+- Added `scripts/benchmark-stage.sh` to run the approved stages end to end.
+
 ## 0.1.0 — 2026-11-07
 
 Initial foundation. Nothing has been benchmarked against a live model yet; the

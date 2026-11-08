@@ -125,3 +125,41 @@ def test_inventory_round_trip(store: Store):
         row = conn.execute("SELECT * FROM inventories WHERE id = ?", (inv_id,)).fetchone()
     assert row["hostname"] == "host"
     assert row["engine"] == "ollama"
+
+
+def test_done_reason_and_truncation_are_stored(store: Store):
+    h = header()
+    store.create_run(h, {}, None, None)
+    for reason in ("stop", "length"):
+        store.add_attempt(
+            h.id,
+            "m",
+            "t",
+            "coding",
+            0,
+            False,
+            GenerationResult(model="m", engine="mock", text="x", raw_final={"done_reason": reason}),
+            None,
+            None,
+        )
+    rows = store.attempts(h.id)
+    assert [r["done_reason"] for r in rows] == ["stop", "length"]
+    assert [r["truncated"] for r in rows] == [0, 1]
+
+
+def test_migration_adds_columns_to_an_older_database(tmp_path):
+    """A database created before a column existed must still open."""
+    import sqlite3
+
+    path = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, "
+        "model TEXT, task_id TEXT, repetition INTEGER, is_warmup INTEGER, ok INTEGER);"
+    )
+    conn.commit()
+    conn.close()
+
+    with Store(path) as store, store.raw() as conn:
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(attempts)")}
+    assert {"done_reason", "truncated"} <= columns

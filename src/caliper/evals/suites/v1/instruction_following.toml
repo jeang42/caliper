@@ -1,4 +1,10 @@
-suite_version = "1.0.1"
+suite_version = "1.1.0"
+# Output budgets note: max_output_tokens must leave room for a thinking
+# model's reasoning tokens, which the engine counts as generated output and
+# which draw on the same budget as the answer. Budgets below are sized so a
+# thinking model reaches its answer; a response that stops at the limit is
+# recorded as truncated and scores zero when no answer was emitted.
+
 
 [[task]]
 id = "instruction.exact_format"
@@ -8,7 +14,7 @@ prompt = """Output exactly the following line and nothing else. No preamble, no
 code fence, no trailing commentary, no quotation marks:
 
 STATUS=ready;RETRIES=0;MODE=serial"""
-max_output_tokens = 100
+max_output_tokens = 1536
 
 [task.validator]
 kind = "exact"
@@ -35,7 +41,7 @@ Required shape:
   }
 
 Include no other keys."""
-max_output_tokens = 300
+max_output_tokens = 1536
 
 [task.validator]
 kind = "json_schema"
@@ -64,6 +70,11 @@ minimum = 0
 type = "string"
 enum = ["ok", "partial", "failed"]
 
+# Observed 2026-11-08: gpt-oss:20b never emits an answer to this task. With a
+# 6144-token budget it produced ~18k characters of reasoning and stopped at the
+# limit with empty visible output. That is recorded as a failure to terminate,
+# not as a wrong answer; see the `truncated` column in reports. Keep this task
+# under review: if every model fails it, it carries no discriminating signal.
 [[task]]
 id = "instruction.multi_constraint"
 category = "instruction_following"
@@ -75,7 +86,7 @@ Constraints, all of which apply at once:
 - Every sentence must begin with the word "Serial".
 - Do not use the words "fast" or "slow" anywhere.
 - End the final sentence with the token [END]."""
-max_output_tokens = 400
+max_output_tokens = 1536
 
 [task.validator]
 kind = "regex_all"
@@ -87,6 +98,9 @@ patterns = [
 ]
 pass_threshold = 1.0
 
+# Observed 2026-11-08: same failure mode as instruction.multi_constraint on
+# gpt-oss:20b - ~13k characters of reasoning, no answer emitted. Tight negative
+# constraints appear to send some thinking models into an unterminated loop.
 [[task]]
 id = "instruction.negative_constraint"
 category = "instruction_following"
@@ -94,7 +108,7 @@ title = "Honour a prohibition while still answering"
 prompt = """Name the two resources that most often limit local LLM inference.
 Answer in one line of at most 12 words. Do not use the letter "e" anywhere in
 your answer."""
-max_output_tokens = 150
+max_output_tokens = 1536
 
 [task.validator]
 kind = "regex_all"

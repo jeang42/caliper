@@ -51,7 +51,12 @@ class RunSettings:
     temperature: float = 0.0
     seed: int | None = 42
     max_output_tokens: int = 512
+    # An explicit CLI override beats a task's own budget. Per-task budgets are
+    # defaults chosen with the suite; when an operator names a number they
+    # mean it, and the value is recorded with the run either way.
+    max_output_tokens_override: int | None = None
     context_length: int = 8192
+    context_length_override: int | None = None
     keep_alive: str = "5m"
     unload_after_run: bool = True
     request_timeout_s: float = 300.0
@@ -86,8 +91,14 @@ def build_options(settings: RunSettings, task: Task) -> dict[str, Any]:
     """
     options: dict[str, Any] = {
         "temperature": task.temperature if task.temperature is not None else settings.temperature,
-        "num_predict": task.max_output_tokens or settings.max_output_tokens,
-        "num_ctx": task.context_length or settings.context_length,
+        "num_predict": (
+            settings.max_output_tokens_override
+            or task.max_output_tokens
+            or settings.max_output_tokens
+        ),
+        "num_ctx": (
+            settings.context_length_override or task.context_length or settings.context_length
+        ),
     }
     if settings.seed is not None:
         options["seed"] = settings.seed

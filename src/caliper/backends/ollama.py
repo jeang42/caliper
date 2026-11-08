@@ -95,6 +95,17 @@ class OllamaBackend:
             )
         return records
 
+    def _listed_size(self, model: str) -> int | None:
+        """On-disk size from /api/tags, which /api/show does not report."""
+        try:
+            data = http.get_json(self._url("/api/tags"), timeout=self.connect_timeout_s)
+        except http.HttpError:
+            return None
+        for entry in data.get("models", []):
+            if entry.get("name") == model or entry.get("model") == model:
+                return entry.get("size")
+        return None
+
     def describe_model(self, model: str) -> ModelRecord:
         """Enrich a tag with /api/show metadata. Missing fields stay None."""
         data = http.post_json(
@@ -121,7 +132,7 @@ class OllamaBackend:
             name=model,
             engine=self.name,
             digest=info.get("general.digest") or data.get("digest"),
-            size_bytes=data.get("size"),
+            size_bytes=data.get("size") or self._listed_size(model),
             family=details.get("family"),
             architecture=arch,
             parameter_size=details.get("parameter_size"),

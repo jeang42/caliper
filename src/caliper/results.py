@@ -92,9 +92,36 @@ class GenerationResult:
     def ok(self) -> bool:
         return self.error is None
 
+    @property
+    def done_reason(self) -> str | None:
+        """Why generation stopped, as the engine reports it."""
+        reason = self.raw_final.get("done_reason")
+        return str(reason) if reason else None
+
+    @property
+    def truncated(self) -> bool:
+        """True when generation stopped because the token budget ran out.
+
+        A truncated response invalidates any judgement about output format,
+        and for a thinking model it can mean no visible answer was produced at
+        all, because thinking tokens draw on the same budget.
+        """
+        return self.done_reason == "length"
+
+    @property
+    def has_visible_output(self) -> bool:
+        """True when the model produced something a grader can look at.
+
+        Thinking text does not count: it is the model's scratchpad, not its
+        answer.
+        """
+        return bool(self.text.strip() or self.tool_calls)
+
     def to_dict(self) -> dict:
         d = asdict(self)
         d["ok"] = self.ok
+        d["done_reason"] = self.done_reason
+        d["truncated"] = self.truncated
         return d
 
 

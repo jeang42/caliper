@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Run one approved benchmark stage from docs/CANDIDATES.md.
+#
+# Each stage runs preflight first and aborts if the GPU is busy, prints the
+# plan, runs the benchmark, then writes a Markdown report and JSON/CSV exports
+# into reports/. Nothing is downloaded. Models already resident on the GPU are
+# never unloaded.
+#
+#   ./scripts/benchmark-stage.sh 2        # run stage 2
+#   ./scripts/benchmark-stage.sh 2 --dry  # show the plan only, no inference
+#   ./scripts/benchmark-stage.sh list     # list the stages
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+CALIPER="${CALIPER:-.venv/bin/caliper}"
+
+if [[ ! -x "$CALIPER" ]]; then
+    echo "error: $CALIPER not found. Create the venv first:" >&2
+    echo "  uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e '.[dev]'" >&2
+    exit 1
+fi
+
+# stage -> "description|caliper run arguments"
+declare -A STAGES=(
+  [1]="smoke test: gpt-oss:20b, instruction following only|--model gpt-oss:20b --category instruction_following --repetitions 2 --warmup 1"
+  [2]="baseline: gpt-oss:20b, full suite, code execution on|--model gpt-oss:20b --repetitions 3 --warmup 1 --allow-code-execution --timeout 900"
+  [3]="comparison: the three fast installed candidates, full suite|--model gpt-oss:20b --model qwen3-coder:30b --model qwen3.5:35b --repetitions 3 --warmup 1 --allow-code-execution --timeout 900"
+  [4]="controls: add a different architecture and a dense model|--model glm-4.7-flash:latest --model qwen3.8:27b --repetitions 3 --warmup 1 --allow-code-execution --timeout 900"
+  [5a]="context scaling at 16k|--model gpt-oss:20b --model qwen3-coder:30b --category long_context --repetitions 2 --warmup 1 --context 16384 --timeout 900"
+  [5b]="context scaling at 32k|--model gpt-oss:20b --model qwen3-coder:30b --category long_context --repetitions 2 --warmup 1 --context 32768 --timeout 900"
+  [5c]="context scaling at 64k|--model gpt-oss:20b --model qwen3-coder:30b --category long_context --repetitions 2 --warmup 1 --context 65536 --timeout 1200"
+)
+
+if [[ "${1:-}" == "list" || -z "${1:-}" ]]; then
+    echo "Stages (see docs/CANDIDATES.md for the rationale):"
+    for key in 1 2 3 4 5a 5b 5c; do
+        printf "  %-3s %s\n" "$key" "${STAGES[$key]%%|*}"
+    done
+    echo
+    echo "Stages 6 and 7 need a download and are deliberately not scripted."
+    exit 0
+fi
+
+STAGE="$1"; shift || true
+if [[ -z "${STAGES[$STAGE]:-}" ]]; then
+    echo "error: unknown stage '$STAGE'. Try: $0 list" >&2
+    exit 1
+fi
+
+DESC="${STAGES[$STAGE]%%|*}"
+ARGS="${STAGES[$STAGE]#*|}"
+DRY=0
+[[ "${1:-}" == "--dry" ]] && DRY=1
+
+echo "=== Stage $STAGE: $DESC ==="
+echo
+
+echo "--- preflight ---"
+if ! $CALIPER preflight --disk /; then
+    echo
+    echo "ABORTED: the machine is too busy to benchmark safely." >&2
+    echo "Re-run later, or override deliberately by adding --force to the run command." >&2
+    exit 2
+fi
+echo
+
+echo "--- plan ---"
+# shellcheck disable=SC2086
+$CALIPER plan --engine ollama $ARGS
+echo
+
+if [[ "$DRY" == "1" ]]; then
+    echo "--dry given: stopping before inference."
+    exit 0
+fi
+
+echo "--- run ---"
+# shellcheck disable=SC2086
+$CALIPER run --engine ollama $ARGS --label "stage $STAGE: $DESC"
+echo
+
+RUN_ID="$($CALIPER runs --limit 1 | awk 'NR==2 {print $1}')"
+REPORT="reports/stage${STAGE}-${RUN_ID}.md"
+echo "--- report ---"
+$CALIPER report --run "$RUN_ID" -o "$REPORT"
+$CALIPER export --run "$RUN_ID" --out-dir reports --responses
+echo
+echo "Stage $STAGE complete."
+echo "  report:  $REPORT"
+echo "  run id:  $RUN_ID"

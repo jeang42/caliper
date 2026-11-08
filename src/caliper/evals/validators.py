@@ -483,6 +483,16 @@ def grade(task_validator: dict[str, Any], result: GenerationResult) -> TaskScore
         return TaskScore(
             0.0, passed=False, validator=kind, detail=f"generation failed: {result.error}"
         )
+    if not result.has_visible_output:
+        # Several validators (negative constraints, lookahead patterns) match
+        # the empty string, so an empty response would otherwise score full
+        # marks. An answer that was never emitted is a failure, and the usual
+        # cause is a thinking model spending its whole token budget before it
+        # starts answering.
+        detail = "no visible output to grade"
+        if result.truncated:
+            detail += " (generation hit the token limit; raise max_output_tokens)"
+        return TaskScore(0.0, passed=False, validator=kind, detail=detail)
     try:
         return fn(task_validator, result)
     except Exception as exc:

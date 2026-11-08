@@ -119,10 +119,10 @@ def _run_settings(args: argparse.Namespace, config: Config) -> RunSettings:
         warmup_runs=args.warmup if args.warmup is not None else run_cfg["warmup_runs"],
         temperature=args.temperature if args.temperature is not None else run_cfg["temperature"],
         seed=run_cfg["seed"] if args.seed is None else (None if args.seed < 0 else args.seed),
-        max_output_tokens=args.max_tokens
-        if args.max_tokens is not None
-        else run_cfg["max_output_tokens"],
-        context_length=args.context if args.context is not None else run_cfg["context_length"],
+        max_output_tokens=run_cfg["max_output_tokens"],
+        max_output_tokens_override=args.max_tokens,
+        context_length=run_cfg["context_length"],
+        context_length_override=args.context,
         keep_alive=args.keep_alive or run_cfg["keep_alive"],
         unload_after_run=not args.no_unload and run_cfg["unload_after_run"],
         request_timeout_s=args.timeout
@@ -338,8 +338,14 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--warmup", type=int)
         p.add_argument("--temperature", type=float)
         p.add_argument("--seed", type=int, help="negative value disables seeding")
-        p.add_argument("--max-tokens", type=int)
-        p.add_argument("--context", type=int, help="num_ctx")
+        p.add_argument(
+            "--max-tokens",
+            type=int,
+            help="num_predict; overrides each task's own budget when given",
+        )
+        p.add_argument(
+            "--context", type=int, help="num_ctx; overrides each task's own value when given"
+        )
         p.add_argument("--keep-alive")
         p.add_argument(
             "--no-unload", action="store_true", help="leave models resident after the run"

@@ -127,6 +127,13 @@ so results are only compared when they were graded by the same definitions.
 Validators: `exact`, `contains_all`, `regex_all`, `choice`, `numeric`,
 `json_schema`, `tool_call`, `python_cases`, `rubric`.
 
+An attempt that produced no visible output scores zero whatever the validator
+says, because negative-constraint patterns match the empty string. Thinking
+models make this a live concern: their reasoning tokens consume the same
+`num_predict` budget as the answer, so a tight budget can truncate the answer
+away entirely. Per-task budgets are sized for this; `--max-tokens` overrides
+them when you need more.
+
 `python_cases` executes model-written Python and is **off by default**; pass
 `--allow-code-execution` to enable it. It runs in a separate isolated
 interpreter with a memory cap and timeout — a guard against runaway test code,

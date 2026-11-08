@@ -202,3 +202,105 @@ def test_export_json_can_include_raw_responses(store, finished_run, tmp_path: Pa
 def test_summarize_unknown_run_raises(store):
     with pytest.raises(KeyError):
         summarize_run(store, "nope")
+
+
+def test_truncation_is_counted_and_surfaced(store):
+    """A response that stopped at the token limit must be visible in the report."""
+    backend = MockBackend(models=["chatty:8b"], answers={"say OK": ""})
+
+    original = backend.generate
+
+    def truncating(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result.raw_final = {"done_reason": "length"}
+        return result
+
+    backend.generate = truncating
+    settings = RunSettings(models=["chatty:8b"], repetitions=1, warmup_runs=0)
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(demo_suite())
+    summary = summarize_run(store, outcome.run_id)
+    assert summary["models"][0]["truncated"] == 3
+    text = render_markdown(summary)
+    assert "truncated" in text
+    assert "stopped at the token limit" in text
+
+
+def test_cold_load_comes_from_the_warmup_attempt(store):
+    """Cold-start cost exists only on the attempt that loaded the model."""
+    backend = MockBackend(models=["fresh:8b"])
+    settings = RunSettings(models=["fresh:8b"], repetitions=1, warmup_runs=1)
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(demo_suite())
+    summary = summarize_run(store, outcome.run_id)
+    perf = summary["models"][0]["performance"]
+    # The mock reports a 2 s load on the first (warmup) call and none after.
+    assert perf["cold_load_s"]["n"] == 1
+    assert perf["cold_load_s"]["mean"] == pytest.approx(2.0)
+    assert perf["model_load_s"]["n"] == 0
+    assert "cold versus warm" in render_markdown(summary)
+
+
+def test_profile_drops_categories_the_run_never_measured(store):
+    """A profile must not build a composite out of untested categories."""
+    backend = MockBackend(models=["m:1b"])
+    settings = RunSettings(models=["m:1b"], categories=["coding"], repetitions=1, warmup_runs=0)
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(demo_suite())
+    summary = summarize_run(store, outcome.run_id)
+    reasoning = next(p for p in summary["profiles"] if p["profile"] == "reasoning_assistant")
+    assert "reasoning" in reasoning["unmeasured_categories"]
+    assert "did not measure" in reasoning["note"] or "none of the categories" in reasoning["note"]
+    assert "**Partial:**" in render_markdown(summary)
+
+
+def test_profile_keeps_the_categories_that_were_measured(store, finished_run):
+    """Only the untested categories are dropped; the tested ones still count.
+
+    The demo suite covers coding and reasoning automatically and agent only by
+    rubric, so the coding profile should drop instruction_following and keep
+    the other two weighted.
+    """
+    summary = summarize_run(store, finished_run)
+    coding = next(p for p in summary["profiles"] if p["profile"] == "coding_assistant")
+    assert coding["unmeasured_categories"] == ["instruction_following"]
+    components = coding["ranking"][0]["components"]
+    assert "quality:coding" in components
+    assert "quality:reasoning" in components
+    assert "quality:instruction_following" not in components
+
+
+def test_rubric_only_category_counts_as_unmeasured(store, finished_run):
+    """Agent tasks in the demo suite are rubric-graded, so they have no
+    automatic score and must not be silently treated as zero."""
+    summary = summarize_run(store, finished_run)
+    agent_profile = next(p for p in summary["profiles"] if p["profile"] == "multi_agent_worker")
+    assert "agent" in agent_profile["unmeasured_categories"]
+
+
+def test_report_states_the_token_limits_actually_sent(store):
+    """The run default is not what the engine received when tasks override it."""
+    suite = Suite(
+        name="t",
+        suite_version="1",
+        tasks=[
+            Task(
+                id="a.big",
+                category="coding",
+                title="t",
+                prompt="say OK",
+                validator={"kind": "exact", "expected": "OK"},
+                max_output_tokens=1536,
+                context_length=16384,
+            )
+        ],
+    )
+    backend = MockBackend(models=["m:1b"], answers={"say OK": "OK"})
+    settings = RunSettings(
+        models=["m:1b"], repetitions=1, warmup_runs=0, max_output_tokens=512, context_length=8192
+    )
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(suite)
+    summary = summarize_run(store, outcome.run_id)
+    assert summary["observed_options"]["num_predict"] == [1536]
+    assert summary["observed_options"]["num_ctx"] == [16384]
+    text = render_markdown(summary)
+    assert "num_predict 1536" in text
+    assert "num_ctx 16384" in text
+    assert "num_predict 512" not in text

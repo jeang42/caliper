@@ -1,4 +1,10 @@
-suite_version = "1.0.1"
+suite_version = "1.1.0"
+# Output budgets note: max_output_tokens must leave room for a thinking
+# model's reasoning tokens, which the engine counts as generated output and
+# which draw on the same budget as the answer. Budgets below are sized so a
+# thinking model reaches its answer; a response that stops at the limit is
+# recorded as truncated and scores zero when no answer was emitted.
+
 
 # The filler placeholder {{FILLER}} is replaced at run time with deterministic,
 # original generated prose (see evals/longctx.py). filler_tokens sets the
@@ -22,7 +28,7 @@ audit window, and that revision has not been changed since.
 Question: which firmware revision was the shard router pinned to during the
 audit window? End your reply with exactly:
 Answer: <revision>"""
-max_output_tokens = 200
+max_output_tokens = 1536
 context_length = 16384
 
 [task.validator]
@@ -49,7 +55,7 @@ Question: can the filed proposal be satisfied without any other change? Answer
 yes or no and give the two log entry numbers you used. End your reply with
 exactly:
 Answer: <yes or no>"""
-max_output_tokens = 400
+max_output_tokens = 1536
 context_length = 16384
 
 [task.validator]
@@ -76,7 +82,7 @@ window.
 
 How many retry-queue incidents were closed during the audit window? Remember the
 formatting rule stated at the top."""
-max_output_tokens = 200
+max_output_tokens = 1536
 context_length = 16384
 
 [task.validator]

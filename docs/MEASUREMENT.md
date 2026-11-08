@@ -94,6 +94,37 @@ The report prints `mean ±stdev` and the sample count everywhere. With a suite
 of this size, category differences smaller than roughly one task's worth of
 score should be treated as noise.
 
+## Thinking models and the output budget
+
+A thinking model's reasoning tokens are counted by the engine as generated
+output and draw on the same `num_predict` budget as the answer. Three
+consequences, all observed on `gpt-oss:20b` on 2026-11-08:
+
+1. **`output_tokens` and `output_tokens_per_s` include reasoning tokens.**
+   That is the correct accounting — they really were generated — but it means
+   tokens/s is not a measure of answer production rate for a thinking model.
+2. **A budget sized for a non-thinking model truncates the answer away.** The
+   suite's per-task budgets were raised in suite version 1.1.0 for this reason.
+3. **Raising the budget does not always help.** On two tight negative-constraint
+   tasks, `gpt-oss:20b` produced 18,300 and 12,817 characters of reasoning at a
+   6,144-token budget and still emitted no answer. That is a failure to
+   terminate, not a measurement artefact, and it scores zero.
+
+An attempt that stops at the limit is recorded with `done_reason = "length"`
+and `truncated = 1`, and the report prints a truncation count per model. An
+attempt with no visible output is scored zero regardless of validator, because
+several validators — negative constraints and lookahead patterns in particular
+— match the empty string and would otherwise award full marks for an answer
+that was never given.
+
+## Suite versioning policy
+
+`suite_version` changes when anything that affects grading changes: a prompt, a
+validator, a token budget or a context setting. Comments and documentation
+notes do not bump it, so results stay comparable across purely editorial
+changes. Two runs are comparable when engine version, model digest and
+`suite_version` all match; the report prints all three.
+
 ## Known limitations
 
 - Engine-reported durations come from Ollama's own instrumentation and are

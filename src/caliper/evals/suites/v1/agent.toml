@@ -1,4 +1,10 @@
-suite_version = "1.0.1"
+suite_version = "1.1.0"
+# Output budgets note: max_output_tokens must leave room for a thinking
+# model's reasoning tokens, which the engine counts as generated output and
+# which draw on the same budget as the answer. Budgets below are sized so a
+# thinking model reaches its answer; a response that stops at the limit is
+# recorded as truncated and scores zero when no answer was emitted.
+
 
 [[task]]
 id = "agent.decompose_task"
@@ -10,7 +16,7 @@ that machine.
 
 Produce a numbered plan of between 4 and 8 steps. Each step must be a concrete
 action, not a goal. Output only the numbered list."""
-max_output_tokens = 600
+max_output_tokens = 2048
 
 [task.validator]
 kind = "rubric"
@@ -33,7 +39,7 @@ enough."
 Decide whether you can proceed. If information is missing, list every missing
 item as a bullet list and ask nothing else. If nothing is missing, say
 "proceed". Do not invent values."""
-max_output_tokens = 400
+max_output_tokens = 2048
 
 [task.validator]
 kind = "contains_all"
@@ -59,7 +65,7 @@ Which is the correct next action?
 
 End your reply with exactly:
 Answer: <letter>"""
-max_output_tokens = 300
+max_output_tokens = 2048
 
 [task.validator]
 kind = "choice"
@@ -75,7 +81,7 @@ an NVIDIA RTX 5000 Ada GPU at 32,768 tokens of context?
 
 If you do not know, say so explicitly and state what measurement would be needed.
 Do not produce a number you cannot support."""
-max_output_tokens = 350
+max_output_tokens = 2048
 
 [task.validator]
 kind = "rubric"

@@ -1,4 +1,10 @@
-suite_version = "1.0.1"
+suite_version = "1.1.0"
+# Output budgets note: max_output_tokens must leave room for a thinking
+# model's reasoning tokens, which the engine counts as generated output and
+# which draw on the same budget as the answer. Budgets below are sized so a
+# thinking model reaches its answer; a response that stops at the limit is
+# recorded as truncated and scores zero when no answer was emitted.
+
 
 [[task]]
 id = "coding.rle_encode"
@@ -13,7 +19,7 @@ An empty string returns an empty list. Preserve the original order and treat
 uppercase and lowercase as different characters.
 
 Reply with a single Python code block and no prose."""
-max_output_tokens = 500
+max_output_tokens = 2048
 requires_code_execution = true
 
 [task.validator]
@@ -44,7 +50,7 @@ It has two defects.
 
 State plainly what each defect is, then give the corrected function in a single
 Python code block. Keep the same name and parameters."""
-max_output_tokens = 700
+max_output_tokens = 2048
 requires_code_execution = true
 
 [task.validator]
@@ -75,7 +81,7 @@ prompt = """What does this program print? Give only the printed lines, nothing e
     e['b'] = 2
     print(sorted(d.items()))
 """
-max_output_tokens = 200
+max_output_tokens = 2048
 
 [task.validator]
 kind = "contains_all"
@@ -93,7 +99,7 @@ prompt = """Here is a function:
 Write pytest tests for it. Cover: a value inside the range, a value below low,
 a value above high, value exactly equal to each bound, and the ValueError case.
 Use `pytest.raises` for the error case. Reply with a single Python code block."""
-max_output_tokens = 600
+max_output_tokens = 2048
 
 [task.validator]
 kind = "regex_all"
@@ -116,7 +122,7 @@ dispatches on exactly two cases that have not changed in two years.
 Give your recommendation in at most 150 words. Say explicitly whether the
 two-case function should be converted, and name the main cost of the registry
 approach."""
-max_output_tokens = 400
+max_output_tokens = 2048
 
 [task.validator]
 kind = "rubric"

@@ -1,4 +1,10 @@
-suite_version = "1.0.1"
+suite_version = "1.1.0"
+# Output budgets note: max_output_tokens must leave room for a thinking
+# model's reasoning tokens, which the engine counts as generated output and
+# which draw on the same budget as the answer. Budgets below are sized so a
+# thinking model reaches its answer; a response that stops at the limit is
+# recorded as truncated and scores zero when no answer was emitted.
+
 
 [[task]]
 id = "reasoning.schedule_constraints"
@@ -14,7 +20,7 @@ one-hour slots, one job per slot. The constraints are:
 
 Work out the single valid ordering. End your reply with exactly:
 Answer: <slot1>,<slot2>,<slot3>,<slot4>"""
-max_output_tokens = 900
+max_output_tokens = 2048
 
 [task.validator]
 kind = "choice"
@@ -32,7 +38,7 @@ prompt which is processed at 800 tokens per second, and the model then generates
 What is the total wall-clock time in seconds? Show your steps, then end with
 exactly:
 Answer: <number>"""
-max_output_tokens = 600
+max_output_tokens = 2048
 
 [task.validator]
 kind = "numeric"
@@ -53,7 +59,7 @@ prompt = """Read this argument:
 Exactly one step makes the conclusion invalid. Name the logical error and say
 which step number is unjustified. End with exactly:
 Answer: <step number>"""
-max_output_tokens = 500
+max_output_tokens = 2048
 
 [task.validator]
 kind = "choice"
@@ -72,7 +78,7 @@ What is the largest context length, rounded down to the nearest 1,000 tokens,
 that still leaves at least 2 GB of VRAM free? Show your working, then end with
 exactly:
 Answer: <number>"""
-max_output_tokens = 700
+max_output_tokens = 2048
 
 [task.validator]
 kind = "numeric"
@@ -90,7 +96,7 @@ parameter model at the same quantization.
 
 In at most 180 words, explain which one is likely to generate tokens faster and
 which one is likely to need more memory, and why those two answers differ."""
-max_output_tokens = 500
+max_output_tokens = 2048
 
 [task.validator]
 kind = "rubric"

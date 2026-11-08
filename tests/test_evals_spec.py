@@ -11,7 +11,7 @@ from caliper.evals.spec import CATEGORIES
 
 def test_v1_suite_is_well_formed():
     suite = load_suite("v1")
-    assert suite.suite_version == "1.0.1"
+    assert suite.suite_version == "1.1.0"
     assert len(suite.tasks) >= 20
     assert set(suite.categories) == set(CATEGORIES)
     for task in suite.tasks:

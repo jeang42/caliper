@@ -115,8 +115,11 @@ class ModelSummary:
     ram_used_peak_mib: Stat = field(default_factory=Stat)
     cpu_util_mean_pct: Stat = field(default_factory=Stat)
     prompt_tokens: Stat = field(default_factory=Stat)
+    cold_load_s: Stat = field(default_factory=Stat)
+    cold_load_gpu_mem_mib: Stat = field(default_factory=Stat)
     attempts: int = 0
     errors: int = 0
+    truncated: int = 0
 
     @property
     def reliability(self) -> float | None:
@@ -141,6 +144,7 @@ class ModelSummary:
             "residency": self.residency,
             "attempts": self.attempts,
             "errors": self.errors,
+            "truncated": self.truncated,
             "reliability": self.reliability,
             "categories": {k: v.to_dict() for k, v in self.categories.items()},
             "performance": {
@@ -149,6 +153,8 @@ class ModelSummary:
                 "ttft_s": self.ttft_s.to_dict(),
                 "total_latency_s": self.latency_s.to_dict(),
                 "model_load_s": self.load_s.to_dict(),
+                "cold_load_s": self.cold_load_s.to_dict(),
+                "cold_load_gpu_mem_mib": self.cold_load_gpu_mem_mib.to_dict(),
                 "prompt_tokens": self.prompt_tokens.to_dict(),
             },
             "telemetry": {
@@ -247,6 +253,7 @@ class ProfileRanking:
     weights: dict[str, Any]
     ranking: list[tuple[str, float, dict[str, float]]]
     note: str = ""
+    unmeasured_categories: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -254,6 +261,7 @@ class ProfileRanking:
             "label": self.label,
             "weights": self.weights,
             "note": self.note,
+            "unmeasured_categories": self.unmeasured_categories,
             "ranking": [{"model": m, "composite": s, "components": c} for m, s, c in self.ranking],
         }
 
@@ -266,12 +274,22 @@ def rank_for_profile(
     latency_norm = _normalize({s.model: s.ttft_s.mean for s in summaries}, False)
     mem_norm = _normalize({s.model: s.gpu_mem_peak_mib.mean for s in summaries}, False)
 
-    cat_norms: dict[str, dict[str, float]] = {}
+    # A category with no automatic score for any model in the run was not
+    # measured. Scoring it as zero would silently punish every model and make
+    # the composite meaningless, so such categories are dropped from the
+    # weighting and named in the note instead.
+    measured: dict[str, dict[str, float]] = {}
+    unmeasured: list[str] = []
     for cat in spec["quality"]:
-        cat_norms[cat] = {
-            s.model: (s.categories[cat].mean_score if cat in s.categories else None) or 0.0
+        values = {
+            s.model: (s.categories[cat].mean_score if cat in s.categories else None)
             for s in summaries
         }
+        if all(v is None for v in values.values()):
+            unmeasured.append(cat)
+        else:
+            measured[cat] = {m: (v or 0.0) for m, v in values.items()}
+    cat_norms = measured
 
     ranking: list[tuple[str, float, dict[str, float]]] = []
     for s in summaries:
@@ -279,6 +297,8 @@ def rank_for_profile(
         total_weight = 0.0
         acc = 0.0
         for cat, weight in spec["quality"].items():
+            if cat not in cat_norms:
+                continue
             value = cat_norms[cat].get(s.model, 0.0)
             components[f"quality:{cat}"] = value
             acc += weight * value
@@ -301,7 +321,20 @@ def rank_for_profile(
         "normalized speed/latency/memory (relative to the models in this comparison), "
         "so composites are not comparable across different model sets."
     )
-    return ProfileRanking(profile, spec["label"], spec, ranking, note)
+    if unmeasured:
+        note += (
+            " This profile weights " + ", ".join(sorted(unmeasured)) + ", which this run "
+            "did not measure; those categories were dropped from the weighting, so the "
+            "composite covers only part of the profile."
+        )
+    if not measured:
+        note = (
+            "This run measured none of the categories this profile weights, so the "
+            "composite reflects speed, latency and memory only."
+        )
+    return ProfileRanking(
+        profile, spec["label"], spec, ranking, note, unmeasured_categories=sorted(unmeasured)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +362,15 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
     by_model: dict[str, list[Any]] = {}
     for row in rows:
         by_model.setdefault(row["model"], []).append(row)
+
+    # Cold-start behaviour only shows up on the attempt that actually loaded
+    # the model, which is normally a warmup. Warmups stay out of every other
+    # aggregate, but they are the only place the cold figures exist.
+    warm_rows = store.attempts(run_id, include_warmup=True)
+    cold_by_model: dict[str, list[Any]] = {}
+    for row in warm_rows:
+        if row["engine_load_duration_s"] and row["engine_load_duration_s"] > 0.5:
+            cold_by_model.setdefault(row["model"], []).append(row)
 
     summaries: list[ModelSummary] = []
     for model, attempts in by_model.items():
@@ -360,6 +402,13 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
             if a["engine_load_duration_s"] and a["engine_load_duration_s"] > 0.01
         )
 
+        cold = cold_by_model.get(model, [])
+        summary.cold_load_s = stat(a["engine_load_duration_s"] for a in cold)
+        summary.cold_load_gpu_mem_mib = stat(
+            (_loads(a["telemetry_json"]) or {}).get("gpu_mem_delta_peak_mib") for a in cold
+        )
+        summary.truncated = sum(1 for a in attempts if a["truncated"])
+
         telemetry = [_loads(a["telemetry_json"]) or {} for a in attempts]
         summary.gpu_mem_peak_mib = stat(t.get("gpu_mem_used_peak_mib") for t in telemetry)
         summary.gpu_mem_delta_mib = stat(t.get("gpu_mem_delta_peak_mib") for t in telemetry)
@@ -389,6 +438,18 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
         summaries.append(summary)
 
     summaries.sort(key=lambda s: s.model)
+    observed: dict[str, list[Any]] = {}
+    for key in ("num_ctx", "num_predict", "temperature", "seed"):
+        values = sorted(
+            {
+                (_loads(a["options_json"]) or {}).get(key)
+                for a in rows
+                if (_loads(a["options_json"]) or {}).get(key) is not None
+            }
+        )
+        if values:
+            observed[key] = values
+
     return {
         "run": {
             "id": run["id"],
@@ -406,6 +467,7 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
             "config": _loads(run["config_json"]),
             "preflight": _loads(run["preflight_json"]),
         },
+        "observed_options": observed,
         "models": [s.to_dict() for s in summaries],
         "profiles": [rank_for_profile(summaries, p).to_dict() for p in PROFILES],
         "_summaries": summaries,
@@ -441,11 +503,20 @@ def render_markdown(summary: dict[str, Any]) -> str:
     if settings:
         add(
             f"- Controls: temperature={settings.get('temperature')}, "
-            f"seed={settings.get('seed')}, num_ctx={settings.get('context_length')}, "
-            f"num_predict={settings.get('max_output_tokens')}, "
+            f"seed={settings.get('seed')}, "
             f"repetitions={settings.get('repetitions')}, "
             f"warmup={settings.get('warmup_runs')}, "
             f"keep_alive={settings.get('keep_alive')!r}"
+        )
+        observed = summary.get("observed_options") or {}
+        ctx = observed.get("num_ctx") or [settings.get("context_length")]
+        predict = observed.get("num_predict") or [settings.get("max_output_tokens")]
+        add(
+            "- Token limits actually sent: num_ctx "
+            + ", ".join(str(v) for v in ctx)
+            + "; num_predict "
+            + ", ".join(str(v) for v in predict)
+            + " (tasks carry their own budgets unless overridden on the command line)"
         )
     add("")
 
@@ -492,7 +563,10 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "sample standard deviation."
     )
     add("")
-    add("| Model | output tok/s | prompt tok/s | TTFT s | total latency s | load s | reliability |")
+    add(
+        "| Model | output tok/s | prompt tok/s | TTFT s | total latency s "
+        "| truncated | reliability |"
+    )
     add("|---|---|---|---|---|---|---|")
     for s in summaries:
         rel = (
@@ -500,9 +574,41 @@ def render_markdown(summary: dict[str, Any]) -> str:
             if s.reliability is None
             else f"{s.reliability:.0%} ({s.attempts - s.errors}/{s.attempts})"
         )
+        trunc = f"{s.truncated}/{s.attempts}" if s.attempts else "n/a"
         add(
             f"| `{s.model}` | {s.output_tps.fmt(1)} | {s.prompt_tps.fmt(0)} | "
-            f"{s.ttft_s.fmt(2)} | {s.latency_s.fmt(1)} | {s.load_s.fmt(1)} | {rel} |"
+            f"{s.ttft_s.fmt(2)} | {s.latency_s.fmt(1)} | {trunc} | {rel} |"
+        )
+    add("")
+    add(
+        "Output tokens include a thinking model's reasoning tokens, because the "
+        "engine counts them as generated. They draw on the same `num_predict` "
+        "budget as the answer."
+    )
+    add("")
+    if any(s.truncated for s in summaries):
+        add(
+            "> Some attempts stopped at the token limit rather than finishing. A "
+            "truncated response cannot be judged on output format, and a thinking "
+            "model can spend its whole budget before emitting any answer, which "
+            "scores zero. Raise `--max-tokens` and re-run those tasks."
+        )
+        add("")
+
+    add("## Model loading: cold versus warm")
+    add("")
+    add(
+        "Cold figures come from the attempt that actually loaded the model, which "
+        "is normally a warmup and is excluded from every other aggregate. Warm "
+        "load time is what a request pays once the model is already resident."
+    )
+    add("")
+    add("| Model | cold load s | weights loaded to GPU | warm load s |")
+    add("|---|---|---|---|")
+    for s in summaries:
+        add(
+            f"| `{s.model}` | {s.cold_load_s.fmt(2)} | "
+            f"{s.cold_load_gpu_mem_mib.fmt(0, ' MiB')} | {s.load_s.fmt(3)} |"
         )
     add("")
 
@@ -538,12 +644,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
     add("")
     add("| Model | configured num_ctx | model max context | mean prompt tokens |")
     add("|---|---|---|---|")
+    sent_ctx = ", ".join(
+        str(v) for v in (summary.get("observed_options") or {}).get("num_ctx", [])
+    ) or str(settings.get("context_length", "n/a"))
     for s in summaries:
         ctx = f"{s.context_length:,}" if s.context_length else "unknown"
-        add(
-            f"| `{s.model}` | {settings.get('context_length', 'n/a')} | {ctx} | "
-            f"{s.prompt_tokens.fmt(0)} |"
-        )
+        add(f"| `{s.model}` | {sent_ctx} | {ctx} | {s.prompt_tokens.fmt(0)} |")
     add("")
 
     add("## Recommendations by workload")
@@ -557,6 +663,9 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"Weights - quality: {qual}; speedx{weights.get('speed', 0)}, "
             f"latencyx{weights.get('latency', 0)}, memoryx{weights.get('memory', 0)}."
         )
+        if prof.get("unmeasured_categories"):
+            add("")
+            add(f"**Partial:** {prof['note']}")
         add("")
         for i, row in enumerate(prof["ranking"][:3], start=1):
             add(f"{i}. `{row['model']}` - composite {row['composite']:.3f}")
@@ -578,6 +687,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "Treat differences under roughly one task's worth of score as noise."
     )
     add("- Tool-use tasks are simulated: tools are declared but never executed.")
+    add(
+        "- A truncated attempt with no visible output scores zero. For a thinking "
+        "model that is a failure to terminate reasoning, which is a different "
+        "fault from answering incorrectly; the `truncated` column distinguishes "
+        "them and raising the budget does not always fix it."
+    )
     add(
         "- Telemetry is sampled, so a brief memory peak between samples can be "
         "missed. The sampling interval is recorded in the run config."

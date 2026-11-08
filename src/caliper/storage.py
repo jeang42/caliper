@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS attempts (
     output_tokens_per_s         REAL,
     prompt_tokens_per_s         REAL,
     was_loaded_before           INTEGER,
+    done_reason                 TEXT,
+    truncated                   INTEGER,
     score                       REAL,
     max_score                   REAL,
     passed                      INTEGER,
@@ -154,10 +156,30 @@ class Store:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
             (str(SCHEMA_VERSION),),
         )
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database was first created.
+
+        CREATE TABLE IF NOT EXISTS leaves an existing table alone, so new
+        columns are added here. Each entry is append-only and nullable, which
+        keeps old rows readable.
+        """
+        added: dict[str, list[tuple[str, str]]] = {
+            "attempts": [("done_reason", "TEXT"), ("truncated", "INTEGER")],
+        }
+        for table, columns in added.items():
+            existing = {
+                row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for name, decl in columns:
+                if name not in existing:
+                    log.info("migrating %s: adding column %s", table, name)
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     def close(self) -> None:
         self._conn.close()
@@ -256,10 +278,10 @@ class Store:
                 prompt_tokens, output_tokens, ttft_s, ttft_source, total_latency_s,
                 engine_total_duration_s, engine_load_duration_s, engine_prompt_eval_duration_s,
                 engine_eval_duration_s, output_tokens_per_s, prompt_tokens_per_s,
-                was_loaded_before, score, max_score, passed, validator, graded, score_detail,
-                sub_scores_json, options_json, response_text, thinking_text, tool_calls_json,
-                telemetry_json, raw_final_json)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                was_loaded_before, done_reason, truncated, score, max_score, passed, validator,
+                graded, score_detail, sub_scores_json, options_json, response_text, thinking_text,
+                tool_calls_json, telemetry_json, raw_final_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 run_id,
                 model,
@@ -284,6 +306,8 @@ class Store:
                 m.output_tokens_per_s,
                 m.prompt_tokens_per_s,
                 None if result.was_loaded_before is None else int(result.was_loaded_before),
+                result.done_reason,
+                int(result.truncated),
                 getattr(score, "score", None),
                 getattr(score, "max_score", None),
                 None if getattr(score, "passed", None) is None else int(score.passed),
