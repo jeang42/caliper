@@ -347,6 +347,25 @@ def test_prompt_cache_hits_are_excluded_from_prompt_throughput(store):
     assert "physically impossible" in text
 
 
-def test_plausible_prompt_rates_are_all_kept(store, finished_run):
+def test_only_the_first_repetition_of_a_task_counts_as_a_cold_prompt(store, finished_run):
+    """Repeating an identical prompt hits the engine's prompt cache, whatever
+    rate it reports, so only the first repetition of each task measures real
+    prompt throughput. Observed undetected by a pure rate threshold: 9,433
+    tokens in 0.108 s, which is 87,000 tok/s against real rates of 1,000-13,000."""
     summary = summarize_run(store, finished_run)
-    assert summary["models"][0]["prompt_cache_hits"] == 0
+    model = summary["models"][0]
+    # The demo suite has 3 tasks at 2 repetitions: 3 cold, 3 cached.
+    assert model["attempts"] == 6
+    assert model["prompt_cache_hits"] == 3
+    assert model["performance"]["prompt_tokens_per_s"]["n"] == 3
+
+
+def test_single_repetition_runs_have_no_cached_prompts(store):
+    backend = MockBackend(
+        models=["m:1b"], answers={"say OK": "OK", "say NO": "NO", "plan": "a plan"}
+    )
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0)
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(demo_suite())
+    model = summarize_run(store, outcome.run_id)["models"][0]
+    assert model["prompt_cache_hits"] == 0
+    assert model["performance"]["prompt_tokens_per_s"]["n"] == 3

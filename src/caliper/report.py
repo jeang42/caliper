@@ -25,17 +25,22 @@ from .storage import Store
 
 GIB = 1024**3
 
-#: Prompt-processing rates above this are not physically achievable by any
-#: current single GPU and indicate the engine served the prompt from its cache
-#: rather than evaluating it. Repeating an identical prompt - which every
-#: benchmark repetition does - triggers exactly that. Observed on this host:
-#: 8168 prompt tokens reported as evaluated in 0.0108 s, i.e. 754,000 tok/s,
-#: against a realistic 1,000-2,000 tok/s for the same prompt when cold.
+#: Backstop for detecting a prompt-cache hit by implausible rate alone.
 #:
-#: Such attempts are excluded from prompt-throughput aggregates and counted
-#: separately, rather than being averaged into a meaningless number. The raw
-#: per-attempt values stay in the database and in the CSV export.
-PROMPT_RATE_PLAUSIBILITY_CEILING = 100_000.0
+#: Prompt throughput is only real when the engine actually evaluated the
+#: prompt. Repeating an identical prompt - which every benchmark repetition
+#: does - makes Ollama report the full token count against a near-zero
+#: duration. Observed on this host: 8,168 tokens in 0.0108 s (754,000 tok/s)
+#: and 9,433 tokens in 0.108 s (87,000 tok/s), against measured cold rates of
+#: 1,000-13,000 tok/s.
+#:
+#: The primary rule is structural rather than numeric: for a given model and
+#: task, only the first measured repetition has a cold prompt cache, so later
+#: repetitions are cache hits by construction and no threshold is needed. This
+#: ceiling then catches the remaining case - a first repetition whose prompt
+#: was already warmed by the run's warmup attempt. It is set well below the
+#: lowest observed cache-hit rate and far above the highest real one.
+PROMPT_RATE_PLAUSIBILITY_CEILING = 50_000.0
 
 
 @dataclass(slots=True)
@@ -432,13 +437,17 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
 
         summary.output_tps = stat(a["output_tokens_per_s"] for a in ok_attempts)
         # Prompt throughput is only meaningful when the prompt was actually
-        # evaluated. See PROMPT_RATE_PLAUSIBILITY_CEILING.
-        cold_prompt = [
-            a
-            for a in ok_attempts
-            if a["prompt_tokens_per_s"] is None
-            or a["prompt_tokens_per_s"] < PROMPT_RATE_PLAUSIBILITY_CEILING
-        ]
+        # evaluated. Only the first measured repetition of a given task sees a
+        # cold prompt cache; see PROMPT_RATE_PLAUSIBILITY_CEILING.
+        seen_tasks: set[str] = set()
+        cold_prompt = []
+        for a in sorted(ok_attempts, key=lambda r: (r["task_id"], r["repetition"])):
+            first_time = a["task_id"] not in seen_tasks
+            seen_tasks.add(a["task_id"])
+            rate = a["prompt_tokens_per_s"]
+            implausible = rate is not None and rate >= PROMPT_RATE_PLAUSIBILITY_CEILING
+            if first_time and not implausible:
+                cold_prompt.append(a)
         summary.prompt_cache_hits = len(ok_attempts) - len(cold_prompt)
         summary.prompt_tps = stat(a["prompt_tokens_per_s"] for a in cold_prompt)
         # A request that had to load the model is not a steady-state request:
@@ -682,12 +691,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
     add("")
     if any(s.prompt_cache_hits for s in summaries):
         add(
-            "*Cached prompts* counts attempts whose reported prompt-processing rate "
-            "was physically impossible, meaning the engine reused its cached prompt "
-            "instead of evaluating it. Repeating an identical prompt causes this, so "
-            "it is expected from the second repetition onwards. Those attempts are "
-            "excluded from the prompt tok/s column. Output throughput is unaffected, "
-            "though a cached prompt does lower TTFT."
+            "*Cached prompts* counts attempts whose prompt the engine reused from "
+            "its cache instead of evaluating. Only the first measured repetition of "
+            "each task sees a cold cache, so the rest are cache hits by construction "
+            "and are excluded from the prompt tok/s column, as is any first "
+            "repetition whose reported rate is physically impossible. Output "
+            "throughput is unaffected, though a cached prompt does lower TTFT."
         )
         add("")
     if any(s.truncated for s in summaries):
@@ -817,12 +826,10 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "differently and are not interchangeable."
     )
     add(
-        "- Prompt throughput is measured only on attempts where the prompt was "
-        "genuinely evaluated; a repeated identical prompt hits the engine's prompt "
-        "cache and is excluded. The exclusion catches cache hits on long prompts, "
-        "where the reported rate becomes physically impossible; a cache hit on a "
-        "short prompt stays under the plausibility ceiling and widens the spread "
-        "instead."
+        "- Prompt throughput is measured only on the first repetition of each "
+        "task, which is the only one whose prompt the engine had to evaluate. "
+        "Later repetitions reuse the cached prompt and are excluded, so this "
+        "column has a smaller sample than the others."
     )
     add(
         "- Repeated attempts at temperature 0 with a fixed seed were observed on "
