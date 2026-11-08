@@ -401,6 +401,23 @@ class Store:
     def attempt(self, attempt_id: int) -> sqlite3.Row | None:
         return self._conn.execute("SELECT * FROM attempts WHERE id = ?", (attempt_id,)).fetchone()
 
+    def measured_seconds_per_attempt(self, model: str) -> tuple[float, int] | None:
+        """Mean wall-clock seconds per attempt for a model, from real runs.
+
+        Used to cost a planned run from history instead of a guess. Dry runs
+        are excluded because mock timings are fabricated. Returns None when
+        the model has never been benchmarked here.
+        """
+        row = self._conn.execute(
+            """SELECT AVG(a.total_latency_s) AS spa, COUNT(*) AS n
+                 FROM attempts a JOIN runs r ON r.id = a.run_id
+                WHERE r.dry_run = 0 AND a.model = ? AND a.total_latency_s IS NOT NULL""",
+            (model,),
+        ).fetchone()
+        if row is None or not row["n"] or row["spa"] is None:
+            return None
+        return float(row["spa"]), int(row["n"])
+
     def run_progress(self, run_id: str) -> dict[str, Any]:
         """Live progress counters for a run, safe to poll.
 

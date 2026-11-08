@@ -143,9 +143,10 @@ def cmd_plan(args: argparse.Namespace, config: Config) -> int:
     settings = _run_settings(args, config)
     suite = load_suite(settings.suite)
     backend = mock_backend_for_suite(suite) if args.dry_run else get_backend(args.engine, config)
-    runner = BenchmarkRunner(backend, Store(config.db_path), settings, config.safety)
+    store = Store(config.db_path)
+    runner = BenchmarkRunner(backend, store, settings, config.safety)
     tasks = runner.select_tasks(suite)
-    cost = estimate_run_cost(settings, tasks)
+    cost = estimate_run_cost(settings, tasks, store=store)
     print(f"Suite `{suite.name}` version {suite.suite_version}")
     print(f"Engine: {backend.name} (version {backend.version()})")
     print(f"Models: {', '.join(settings.models)}")
@@ -163,7 +164,12 @@ def cmd_plan(args: argparse.Namespace, config: Config) -> int:
     print()
     print("Estimated cost (ESTIMATE):")
     for key, value in cost.items():
-        print(f"  {key}: {value}")
+        if isinstance(value, float):
+            print(f"  {key}: {value:.1f}")
+        elif value in (None, {}, []):
+            continue
+        else:
+            print(f"  {key}: {value}")
     print()
     print("Controls:")
     for key, value in settings.to_dict().items():

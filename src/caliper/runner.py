@@ -338,19 +338,71 @@ class BenchmarkRunner:
         return result, score
 
 
+#: Fallback per-attempt cost for a model with no measured history. Measured
+#: values on one host spanned 1.3 to 11.8 s/attempt, a 9x range, so this
+#: number is only ever a placeholder until a model has been run once.
+DEFAULT_SECONDS_PER_ATTEMPT = 25.0
+
+
 def estimate_run_cost(
-    settings: RunSettings, tasks: list[Task], seconds_per_attempt: float = 25.0
+    settings: RunSettings,
+    tasks: list[Task],
+    store: Any | None = None,
+    seconds_per_attempt: float = DEFAULT_SECONDS_PER_ATTEMPT,
 ) -> dict[str, Any]:
-    """Rough wall-clock estimate for a planned run. ESTIMATE only."""
+    """Wall-clock estimate for a planned run. Always an ESTIMATE.
+
+    When ``store`` is given, each model is costed from its own measured
+    history on this machine rather than a single global guess; models never
+    benchmarked here fall back to ``seconds_per_attempt``. The result says
+    which models were measured and which were assumed, because an estimate
+    built partly from guesses should not look like one built from data.
+    """
     per_model = settings.warmup_runs + len(tasks) * settings.repetitions
     total = per_model * len(settings.models)
+
+    measured: dict[str, float] = {}
+    assumed: list[str] = []
+    samples: dict[str, int] = {}
+    seconds = 0.0
+    for model in settings.models:
+        history = store.measured_seconds_per_attempt(model) if store is not None else None
+        if history is None:
+            assumed.append(model)
+            seconds += per_model * seconds_per_attempt
+        else:
+            spa, n = history
+            measured[model] = round(spa, 2)
+            samples[model] = n
+            seconds += per_model * spa
+
+    if not settings.models:
+        basis = "no models selected"
+    elif not assumed:
+        basis = "costed from this machine's measured history for every model"
+    elif not measured:
+        basis = (
+            f"no measured history; assuming {seconds_per_attempt:.0f} s/attempt, "
+            "which is a placeholder and may be wrong by several times"
+        )
+    else:
+        basis = (
+            "mixed: measured history for "
+            + ", ".join(sorted(measured))
+            + f"; assuming {seconds_per_attempt:.0f} s/attempt for "
+            + ", ".join(sorted(assumed))
+        )
+
     return {
         "models": len(settings.models),
         "tasks": len(tasks),
         "repetitions": settings.repetitions,
         "attempts_per_model": per_model,
         "total_attempts": total,
-        "assumed_seconds_per_attempt": seconds_per_attempt,
-        "estimated_minutes": total * seconds_per_attempt / 60.0,
-        "basis": "estimate; actual time depends on model speed and output length",
+        "measured_seconds_per_attempt": measured,
+        "measured_sample_counts": samples,
+        "assumed_models": assumed,
+        "assumed_seconds_per_attempt": seconds_per_attempt if assumed else None,
+        "estimated_minutes": seconds / 60.0,
+        "basis": basis,
     }

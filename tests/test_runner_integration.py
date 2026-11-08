@@ -410,3 +410,52 @@ def test_task_ordering_is_stable_within_a_context_group(store):
     settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0)
     runner = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS)
     assert [t.id for t in runner.select_tasks(suite)] == ["t.0", "t.1", "t.2", "t.3"]
+
+
+def test_cost_estimate_uses_measured_history_when_available(store):
+    """A single global guess spanned 9x the real range across models, so a
+    model that has been benchmarked here must be costed from its own data."""
+    backend = MockBackend(models=["seen:1b"])
+    settings = RunSettings(models=["seen:1b"], repetitions=1, warmup_runs=0)
+    BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
+
+    history = store.measured_seconds_per_attempt("seen:1b")
+    assert history is not None
+    measured_spa, samples = history
+    assert samples == 2
+
+    cost = estimate_run_cost(settings, tiny_suite().tasks, store=store)
+    assert cost["assumed_models"] == []
+    assert cost["assumed_seconds_per_attempt"] is None
+    assert cost["measured_seconds_per_attempt"]["seen:1b"] == pytest.approx(measured_spa, abs=0.01)
+    assert cost["estimated_minutes"] == pytest.approx(2 * measured_spa / 60.0, rel=0.01)
+    assert "measured history" in cost["basis"]
+
+
+def test_cost_estimate_falls_back_and_says_so(store):
+    settings = RunSettings(models=["never-run:70b"], repetitions=1, warmup_runs=0)
+    cost = estimate_run_cost(settings, tiny_suite().tasks, store=store, seconds_per_attempt=30.0)
+    assert cost["assumed_models"] == ["never-run:70b"]
+    assert cost["measured_seconds_per_attempt"] == {}
+    assert cost["estimated_minutes"] == pytest.approx(2 * 30.0 / 60.0)
+    assert "placeholder" in cost["basis"]
+
+
+def test_cost_estimate_marks_a_mixed_basis(store):
+    backend = MockBackend(models=["seen:1b"])
+    BenchmarkRunner(
+        backend, store, RunSettings(models=["seen:1b"], repetitions=1, warmup_runs=0), THRESHOLDS
+    ).run(tiny_suite())
+    settings = RunSettings(models=["seen:1b", "unseen:8b"], repetitions=1, warmup_runs=0)
+    cost = estimate_run_cost(settings, tiny_suite().tasks, store=store)
+    assert cost["basis"].startswith("mixed:")
+    assert cost["assumed_models"] == ["unseen:8b"]
+    assert "seen:1b" in cost["measured_seconds_per_attempt"]
+
+
+def test_measured_history_ignores_dry_runs(store):
+    """Mock timings are fabricated, so they must never cost a real run."""
+    backend = MockBackend(models=["mocked:1b"])
+    settings = RunSettings(models=["mocked:1b"], repetitions=1, warmup_runs=0, dry_run=True)
+    BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
+    assert store.measured_seconds_per_attempt("mocked:1b") is None

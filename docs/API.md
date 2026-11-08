@@ -76,7 +76,7 @@ from caliper.config import load_config
 from caliper.storage import Store
 from caliper.report import summarize_run, rank_for_profile, PROFILES
 
-config = load_config()                      # honours CALIPER_CONFIG / CALIPER_HOME
+config = load_config()  # honours CALIPER_CONFIG / CALIPER_HOME
 with Store(config.db_path) as store:
     run_id = store.latest_run_id(dry_run=False)
     summary = summarize_run(store, run_id)  # plain dicts, JSON-serialisable
