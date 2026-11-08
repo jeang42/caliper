@@ -304,3 +304,46 @@ def test_report_states_the_token_limits_actually_sent(store):
     assert "num_predict 1536" in text
     assert "num_ctx 16384" in text
     assert "num_predict 512" not in text
+
+
+def test_prompt_cache_hits_are_excluded_from_prompt_throughput(store):
+    """An impossible prompt rate means the engine reused a cached prompt.
+
+    Averaging those in produced a reported 61,560 tok/s on real hardware that
+    sustains roughly 1,000-2,000.
+    """
+    from caliper.report import PROMPT_RATE_PLAUSIBILITY_CEILING
+
+    backend = MockBackend(models=["m:1b"], answers={"say OK": "OK"})
+    settings = RunSettings(models=["m:1b"], repetitions=2, warmup_runs=0)
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(demo_suite())
+
+    # Half the attempts get a plausible prompt rate, half an impossible one.
+    with store.raw() as conn:
+        ids = [
+            r["id"]
+            for r in conn.execute(
+                "SELECT id FROM attempts WHERE run_id = ? ORDER BY id", (outcome.run_id,)
+            )
+        ]
+        assert len(ids) == 6
+        for i, attempt_id in enumerate(ids):
+            rate = 1500.0 if i % 2 == 0 else 750_000.0
+            conn.execute(
+                "UPDATE attempts SET prompt_tokens_per_s = ? WHERE id = ?", (rate, attempt_id)
+            )
+
+    summary = summarize_run(store, outcome.run_id)
+    model = summary["models"][0]
+    assert model["prompt_cache_hits"] == 3
+    prompt_rate = model["performance"]["prompt_tokens_per_s"]
+    assert prompt_rate["n"] == 3
+    assert prompt_rate["max"] < PROMPT_RATE_PLAUSIBILITY_CEILING
+    text = render_markdown(summary)
+    assert "cached prompts" in text
+    assert "physically impossible" in text
+
+
+def test_plausible_prompt_rates_are_all_kept(store, finished_run):
+    summary = summarize_run(store, finished_run)
+    assert summary["models"][0]["prompt_cache_hits"] == 0

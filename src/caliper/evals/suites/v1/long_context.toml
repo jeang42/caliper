@@ -1,4 +1,4 @@
-suite_version = "1.1.0"
+suite_version = "1.2.0"
 # Output budgets note: max_output_tokens must leave room for a thinking
 # model's reasoning tokens, which the engine counts as generated output and
 # which draw on the same budget as the answer. Budgets below are sized so a
@@ -6,6 +6,11 @@ suite_version = "1.1.0"
 # recorded as truncated and scores zero when no answer was emitted.
 
 
+# Output budgets: 4096, higher than other categories. Verified 2026-11-08 -
+# gpt-oss:20b truncated longctx.relate_distant 2 of 3 times at 1536 tokens and
+# passed 2 of 2 at 4096. A long-context task must read the document and then
+# reason about it, so it needs more thinking room than a short-prompt task.
+#
 # The filler placeholder {{FILLER}} is replaced at run time with deterministic,
 # original generated prose (see evals/longctx.py). filler_tokens sets the
 # approximate size; the actual prompt token count is recorded per run from the
@@ -28,7 +33,7 @@ audit window, and that revision has not been changed since.
 Question: which firmware revision was the shard router pinned to during the
 audit window? End your reply with exactly:
 Answer: <revision>"""
-max_output_tokens = 1536
+max_output_tokens = 4096
 context_length = 16384
 
 [task.validator]
@@ -55,7 +60,7 @@ Question: can the filed proposal be satisfied without any other change? Answer
 yes or no and give the two log entry numbers you used. End your reply with
 exactly:
 Answer: <yes or no>"""
-max_output_tokens = 1536
+max_output_tokens = 4096
 context_length = 16384
 
 [task.validator]
@@ -82,7 +87,7 @@ window.
 
 How many retry-queue incidents were closed during the audit window? Remember the
 formatting rule stated at the top."""
-max_output_tokens = 1536
+max_output_tokens = 4096
 context_length = 16384
 
 [task.validator]

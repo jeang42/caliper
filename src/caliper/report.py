@@ -25,6 +25,18 @@ from .storage import Store
 
 GIB = 1024**3
 
+#: Prompt-processing rates above this are not physically achievable by any
+#: current single GPU and indicate the engine served the prompt from its cache
+#: rather than evaluating it. Repeating an identical prompt - which every
+#: benchmark repetition does - triggers exactly that. Observed on this host:
+#: 8168 prompt tokens reported as evaluated in 0.0108 s, i.e. 754,000 tok/s,
+#: against a realistic 1,000-2,000 tok/s for the same prompt when cold.
+#:
+#: Such attempts are excluded from prompt-throughput aggregates and counted
+#: separately, rather than being averaged into a meaningless number. The raw
+#: per-attempt values stay in the database and in the CSV export.
+PROMPT_RATE_PLAUSIBILITY_CEILING = 100_000.0
+
 
 @dataclass(slots=True)
 class Stat:
@@ -120,6 +132,7 @@ class ModelSummary:
     attempts: int = 0
     errors: int = 0
     truncated: int = 0
+    prompt_cache_hits: int = 0
 
     @property
     def reliability(self) -> float | None:
@@ -145,6 +158,7 @@ class ModelSummary:
             "attempts": self.attempts,
             "errors": self.errors,
             "truncated": self.truncated,
+            "prompt_cache_hits": self.prompt_cache_hits,
             "reliability": self.reliability,
             "categories": {k: v.to_dict() for k, v in self.categories.items()},
             "performance": {
@@ -391,7 +405,16 @@ def summarize_run(store: Store, run_id: str) -> dict[str, Any]:
         ok_attempts = [a for a in attempts if a["ok"]]
 
         summary.output_tps = stat(a["output_tokens_per_s"] for a in ok_attempts)
-        summary.prompt_tps = stat(a["prompt_tokens_per_s"] for a in ok_attempts)
+        # Prompt throughput is only meaningful when the prompt was actually
+        # evaluated. See PROMPT_RATE_PLAUSIBILITY_CEILING.
+        cold_prompt = [
+            a
+            for a in ok_attempts
+            if a["prompt_tokens_per_s"] is None
+            or a["prompt_tokens_per_s"] < PROMPT_RATE_PLAUSIBILITY_CEILING
+        ]
+        summary.prompt_cache_hits = len(ok_attempts) - len(cold_prompt)
+        summary.prompt_tps = stat(a["prompt_tokens_per_s"] for a in cold_prompt)
         summary.ttft_s = stat(a["ttft_s"] for a in ok_attempts)
         summary.latency_s = stat(a["total_latency_s"] for a in ok_attempts)
         summary.prompt_tokens = stat(a["prompt_tokens"] for a in ok_attempts)
@@ -565,9 +588,9 @@ def render_markdown(summary: dict[str, Any]) -> str:
     add("")
     add(
         "| Model | output tok/s | prompt tok/s | TTFT s | total latency s "
-        "| truncated | reliability |"
+        "| truncated | cached prompts | reliability |"
     )
-    add("|---|---|---|---|---|---|---|")
+    add("|---|---|---|---|---|---|---|---|")
     for s in summaries:
         rel = (
             "n/a"
@@ -575,9 +598,10 @@ def render_markdown(summary: dict[str, Any]) -> str:
             else f"{s.reliability:.0%} ({s.attempts - s.errors}/{s.attempts})"
         )
         trunc = f"{s.truncated}/{s.attempts}" if s.attempts else "n/a"
+        cached = f"{s.prompt_cache_hits}/{s.attempts}" if s.attempts else "n/a"
         add(
             f"| `{s.model}` | {s.output_tps.fmt(1)} | {s.prompt_tps.fmt(0)} | "
-            f"{s.ttft_s.fmt(2)} | {s.latency_s.fmt(1)} | {trunc} | {rel} |"
+            f"{s.ttft_s.fmt(2)} | {s.latency_s.fmt(1)} | {trunc} | {cached} | {rel} |"
         )
     add("")
     add(
@@ -586,6 +610,16 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "budget as the answer."
     )
     add("")
+    if any(s.prompt_cache_hits for s in summaries):
+        add(
+            "*Cached prompts* counts attempts whose reported prompt-processing rate "
+            "was physically impossible, meaning the engine reused its cached prompt "
+            "instead of evaluating it. Repeating an identical prompt causes this, so "
+            "it is expected from the second repetition onwards. Those attempts are "
+            "excluded from the prompt tok/s column. Output throughput is unaffected, "
+            "though a cached prompt does lower TTFT."
+        )
+        add("")
     if any(s.truncated for s in summaries):
         add(
             "> Some attempts stopped at the token limit rather than finishing. A "

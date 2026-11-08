@@ -24,7 +24,7 @@ def test_tasks_command_lists_the_suite(capsys):
     assert main(["tasks"]) == 0
     out = capsys.readouterr().out
     assert "coding.rle_encode" in out
-    assert "version 1.1.0" in out
+    assert "version 1.2.0" in out
 
 
 def test_tasks_command_filters_by_category(capsys):
