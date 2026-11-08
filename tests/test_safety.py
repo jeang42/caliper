@@ -99,3 +99,44 @@ def test_required_disk_overrides_threshold(monkeypatch):
     monkeypatch.setattr(safety.hardware, "sample_gpus", lambda: _gpu(0, 31000))
     result = safety.preflight(THRESHOLDS, required_disk_gib=500.0)
     assert not result.ok
+
+
+def test_wait_until_clear_returns_as_soon_as_it_passes(monkeypatch):
+    """A queued stage often starts while the previous one's GPU activity is
+    still settling, so waiting is the correct response to a busy machine."""
+    monkeypatch.setattr(safety.hardware, "collect_machine_info", lambda paths=None: _machine())
+    busy = iter([95.0, 95.0, 2.0])
+    monkeypatch.setattr(safety.hardware, "sample_gpus", lambda: _gpu(next(busy, 2.0), 31000))
+    slept: list[float] = []
+    monkeypatch.setattr(safety.time, "sleep", slept.append)
+
+    seen: list[float] = []
+    result = safety.wait_until_clear(
+        dict(THRESHOLDS, gpu_sample_count=1),
+        timeout_s=60.0,
+        poll_interval_s=1.0,
+        on_wait=lambda res, left: seen.append(left),
+    )
+    assert result.ok
+    assert len(seen) == 2  # two failing polls, then success
+    assert slept == [1.0, 1.0]
+
+
+def test_wait_until_clear_gives_up_at_the_deadline(monkeypatch):
+    monkeypatch.setattr(safety.hardware, "collect_machine_info", lambda paths=None: _machine())
+    monkeypatch.setattr(safety.hardware, "sample_gpus", lambda: _gpu(99.0, 31000))
+    monkeypatch.setattr(safety.time, "sleep", lambda _s: None)
+    result = safety.wait_until_clear(
+        dict(THRESHOLDS, gpu_sample_count=1), timeout_s=0.0, poll_interval_s=0.01
+    )
+    assert not result.ok
+    assert any(c.name == "gpu_utilization" for c in result.blocking_failures)
+
+
+def test_wait_until_clear_does_not_wait_when_already_clear(monkeypatch):
+    monkeypatch.setattr(safety.hardware, "collect_machine_info", lambda paths=None: _machine())
+    monkeypatch.setattr(safety.hardware, "sample_gpus", lambda: _gpu(0.0, 31000))
+    calls: list[float] = []
+    monkeypatch.setattr(safety.time, "sleep", calls.append)
+    assert safety.wait_until_clear(dict(THRESHOLDS, gpu_sample_count=1), timeout_s=60.0).ok
+    assert calls == []

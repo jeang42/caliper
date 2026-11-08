@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.1 — 2026-11-08
+
+Benchmark stages 4 and 5 executed. Five models and a full context-scaling
+curve are now measured; see [docs/RESULTS.md](docs/RESULTS.md).
+
+- **Prompt-cache detection is now structural.** The rate ceiling missed real
+  cache hits (9,433 tokens in 0.108 s = 87,000 tok/s passed under a 100,000
+  ceiling). Only the first repetition of a task has a cold prompt cache, so
+  later ones are cache hits by construction and no threshold is needed.
+  Corrected prompt throughput for the five models: 3,549 / 3,196 / 1,937 /
+  2,222 / 800 tok/s, replacing figures inflated two- to ninefold. The metric
+  now shows the dense model paying 4x per prompt token, which the inflated
+  numbers hid.
+- **`--wait` on `preflight` and `run`**, so a queued stage waits out a busy
+  GPU instead of aborting. Stage 5b was blocked by the tail of stage 5a's own
+  activity; waiting is the right response to a busy machine, lowering the
+  threshold is not. The stage script now waits `CALIPER_WAIT` seconds
+  (default 180).
+- **Cost estimates come from measured history** per model instead of one
+  global 25 s/attempt guess. Measured values span 1.3 to 11.8 s/attempt, a 9x
+  range. The output names which models were measured and which assumed.
+- The context-grouped task ordering added in 0.1.2 is confirmed working:
+  reloads fell to the single unavoidable context switch.
+- Correction to an earlier claim: the suite does **not** have a general
+  quality ceiling. With five models measured, five of six categories
+  discriminate with spreads of 0.33-0.56. Only `long_context` is saturated.
+
 ## 0.2.0 — 2026-11-08
 
 Web viewer, manual rubric grading, and re-grading without inference.

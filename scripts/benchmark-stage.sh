@@ -7,6 +7,10 @@
 # never unloaded.
 #
 #   ./scripts/benchmark-stage.sh 2        # run stage 2
+#
+# A busy GPU is waited out for CALIPER_WAIT seconds (default 180) rather than
+# aborting, because a stage queued after another often starts while the
+# previous one is still settling.
 #   ./scripts/benchmark-stage.sh 2 --dry  # show the plan only, no inference
 #   ./scripts/benchmark-stage.sh list     # list the stages
 set -euo pipefail
@@ -56,7 +60,10 @@ echo "=== Stage $STAGE: $DESC ==="
 echo
 
 echo "--- preflight ---"
-if ! $CALIPER preflight --disk /; then
+# Stages are often queued back to back, and a run that has just finished leaves
+# the GPU busy for a few seconds. Wait for it to settle rather than failing, or
+# worse, lowering the safety threshold.
+if ! $CALIPER preflight --disk / --wait "${CALIPER_WAIT:-180}"; then
     echo
     echo "ABORTED: the machine is too busy to benchmark safely." >&2
     echo "Re-run later, or override deliberately by adding --force to the run command." >&2
@@ -76,7 +83,8 @@ fi
 
 echo "--- run ---"
 # shellcheck disable=SC2086
-$CALIPER run --engine ollama $ARGS --label "stage $STAGE: $DESC"
+$CALIPER run --engine ollama $ARGS --wait "${CALIPER_WAIT:-180}" \
+    --label "stage $STAGE: $DESC"
 echo
 
 RUN_ID="$($CALIPER runs --limit 1 | awk 'NR==2 {print $1}')"

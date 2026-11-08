@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 
 from . import hardware
@@ -66,6 +67,37 @@ class PreflightResult:
 
 def _own_pids() -> set[int]:
     return {os.getpid()}
+
+
+def wait_until_clear(
+    safety: dict,
+    timeout_s: float,
+    gpu_index: int = 0,
+    disk_paths: list[str] | None = None,
+    poll_interval_s: float = 10.0,
+    on_wait: Callable[[PreflightResult, float], None] | None = None,
+) -> PreflightResult:
+    """Poll preflight until it passes or ``timeout_s`` elapses.
+
+    Queued runs need this: a benchmark that has just finished leaves the GPU
+    briefly busy, so a preflight taken immediately afterwards can block the
+    next stage even though the machine is about to be free. Waiting is the
+    correct response to a busy machine - lowering the threshold is not.
+
+    Returns the last result either way; the caller decides what to do with a
+    still-failing one.
+    """
+    deadline = time.monotonic() + max(timeout_s, 0.0)
+    while True:
+        result = preflight(safety, gpu_index=gpu_index, disk_paths=disk_paths)
+        if result.ok:
+            return result
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return result
+        if on_wait is not None:
+            on_wait(result, remaining)
+        time.sleep(min(poll_interval_s, remaining))
 
 
 def preflight(

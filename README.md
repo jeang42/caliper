@@ -200,6 +200,8 @@ is not ground truth.
 - [docs/GRADING.md](docs/GRADING.md) — manual rubric grading procedure
 - [docs/CANDIDATES.md](docs/CANDIDATES.md) — model candidate analysis and the
   proposed experiment order for this host
+- [docs/RESULTS.md](docs/RESULTS.md) — measured results for the models
+  benchmarked so far, and which model to use for which workload
 - [docs/API.md](docs/API.md) — the HTTP API and the stable Python API for
   other programs and agents
 - [docs/ROADMAP.md](docs/ROADMAP.md) — what is not built yet, including the

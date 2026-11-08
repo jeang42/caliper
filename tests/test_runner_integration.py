@@ -459,3 +459,29 @@ def test_measured_history_ignores_dry_runs(store):
     settings = RunSettings(models=["mocked:1b"], repetitions=1, warmup_runs=0, dry_run=True)
     BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
     assert store.measured_seconds_per_attempt("mocked:1b") is None
+
+
+def test_runner_waits_for_a_busy_machine_when_asked(store, monkeypatch):
+    """--wait turns a transient block into a delay rather than an abort."""
+    attempts = {"n": 0}
+
+    def fake_wait(safety, timeout_s, gpu_index=0, on_wait=None, **kw):
+        attempts["n"] += 1
+        return safety_mod.PreflightResult(checks=[safety_mod.Check("gpu_utilization", True, "ok")])
+
+    monkeypatch.setattr(safety_mod, "wait_until_clear", fake_wait)
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0, wait_for_clear_s=120.0)
+    runner = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS)
+    outcome = runner.run(tiny_suite())
+    assert attempts["n"] == 1
+    assert outcome.attempts == 2
+
+
+def test_runner_does_not_wait_by_default(store, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("should not wait without --wait")
+
+    monkeypatch.setattr(safety_mod, "wait_until_clear", boom)
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0)
+    runner = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS)
+    assert runner.run(tiny_suite()).attempts == 2

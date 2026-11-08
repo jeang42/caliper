@@ -93,9 +93,22 @@ def cmd_models(args: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_preflight(args: argparse.Namespace, config: Config) -> int:
-    result = safety_mod.preflight(
-        config.safety, gpu_index=args.gpu_index, disk_paths=args.disk or ["/"]
-    )
+    if args.wait:
+        result = safety_mod.wait_until_clear(
+            config.safety,
+            timeout_s=args.wait,
+            gpu_index=args.gpu_index,
+            disk_paths=args.disk or ["/"],
+            on_wait=lambda res, left: print(
+                f"waiting for the machine to free up ({left:.0f}s left): "
+                + "; ".join(c.detail for c in res.blocking_failures),
+                file=sys.stderr,
+            ),
+        )
+    else:
+        result = safety_mod.preflight(
+            config.safety, gpu_index=args.gpu_index, disk_paths=args.disk or ["/"]
+        )
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, default=str))
     else:
@@ -136,6 +149,7 @@ def _run_settings(args: argparse.Namespace, config: Config) -> RunSettings:
         dry_run=args.dry_run,
         label=args.label,
         force=getattr(args, "force", False),
+        wait_for_clear_s=getattr(args, "wait", None) or 0.0,
     )
 
 
@@ -381,6 +395,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_pre = sub.add_parser("preflight", help="check whether it is safe to run now")
     p_pre.add_argument("--json", action="store_true")
     p_pre.add_argument("--disk", nargs="+")
+    p_pre.add_argument(
+        "--wait",
+        type=float,
+        metavar="SECONDS",
+        help="poll until the machine is free, up to this long, instead of failing at once",
+    )
     p_pre.set_defaults(func=cmd_preflight)
 
     def add_run_args(p: argparse.ArgumentParser) -> None:
@@ -423,6 +443,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_run = sub.add_parser("run", help="execute a benchmark run")
     add_run_args(p_run)
     p_run.add_argument("--force", action="store_true", help="override preflight failures")
+    p_run.add_argument(
+        "--wait",
+        type=float,
+        metavar="SECONDS",
+        help="wait up to this long for a busy machine instead of aborting",
+    )
     p_run.set_defaults(func=cmd_run)
 
     p_report = sub.add_parser("report", help="render a report for a stored run")

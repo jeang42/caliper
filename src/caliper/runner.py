@@ -66,6 +66,9 @@ class RunSettings:
     dry_run: bool = False
     label: str | None = None
     force: bool = False
+    # Seconds to wait for a busy machine before giving up. A queued stage
+    # often starts while the previous one's GPU activity is still settling.
+    wait_for_clear_s: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         from dataclasses import asdict
@@ -141,6 +144,16 @@ class BenchmarkRunner:
 
     # -- preparation ------------------------------------------------------
     def preflight(self) -> safety_mod.PreflightResult:
+        if self.settings.wait_for_clear_s > 0:
+            return safety_mod.wait_until_clear(
+                self.safety,
+                timeout_s=self.settings.wait_for_clear_s,
+                gpu_index=self.settings.gpu_index,
+                on_wait=lambda res, left: self.progress(
+                    f"machine busy, waiting up to {left:.0f}s more: "
+                    + "; ".join(c.detail for c in res.blocking_failures)
+                ),
+            )
         return safety_mod.preflight(self.safety, gpu_index=self.settings.gpu_index)
 
     def select_tasks(self, suite: Suite) -> list[Task]:
