@@ -1,0 +1,319 @@
+"""End-to-end runner tests against the mock backend (no GPU involved)."""
+
+from __future__ import annotations
+
+import pytest
+
+from caliper import safety as safety_mod
+from caliper.backends import MockBackend
+from caliper.evals import load_suite
+from caliper.evals.spec import Suite, Task
+from caliper.hardware import TelemetrySampler
+from caliper.runner import (
+    BenchmarkRunner,
+    RunAborted,
+    RunSettings,
+    build_options,
+    estimate_run_cost,
+)
+
+THRESHOLDS = {
+    "max_gpu_utilization_pct": 25.0,
+    "min_free_vram_mib": 1.0,
+    "min_free_ram_mib": 1.0,
+    "min_free_disk_gib": 0.1,
+    "allow_foreign_gpu_processes": True,
+    "max_foreign_gpu_mib": 100000.0,
+    "gpu_sample_count": 1,
+    "gpu_sample_interval_s": 0.0,
+}
+
+
+@pytest.fixture(autouse=True)
+def no_telemetry_threads(monkeypatch):
+    """Keep tests fast and free of nvidia-smi calls."""
+    monkeypatch.setattr("caliper.hardware.sample_gpus", lambda: [])
+    monkeypatch.setattr(TelemetrySampler, "interval_s", 0.01, raising=False)
+
+
+def tiny_suite() -> Suite:
+    return Suite(
+        name="test",
+        suite_version="9.9.9",
+        tasks=[
+            Task(
+                id="t.exact",
+                category="instruction_following",
+                title="exact",
+                prompt="say OK",
+                validator={"kind": "exact", "expected": "OK"},
+            ),
+            Task(
+                id="t.rubric",
+                category="agent",
+                title="rubric",
+                prompt="plan something",
+                validator={"kind": "rubric", "criteria": ["a"]},
+            ),
+        ],
+    )
+
+
+def test_run_records_every_attempt(store):
+    backend = MockBackend(models=["mock-small:1b"], answers={"say OK": "OK"})
+    settings = RunSettings(models=["mock-small:1b"], repetitions=2, warmup_runs=1)
+    runner = BenchmarkRunner(backend, store, settings, THRESHOLDS)
+    outcome = runner.run(tiny_suite())
+
+    assert outcome.status == "completed"
+    measured = store.attempts(outcome.run_id)
+    all_attempts = store.attempts(outcome.run_id, include_warmup=True)
+    assert len(measured) == 4  # 2 tasks x 2 reps
+    assert len(all_attempts) == 5  # plus 1 warmup
+    assert sum(a["is_warmup"] for a in all_attempts) == 1
+
+    exact = [a for a in measured if a["task_id"] == "t.exact"]
+    assert all(a["score"] == 1.0 and a["passed"] == 1 for a in exact)
+    rubric = [a for a in measured if a["task_id"] == "t.rubric"]
+    assert all(a["score"] is None and a["graded"] == "manual_rubric" for a in rubric)
+
+
+def test_run_stores_config_machine_and_model_metadata(store):
+    backend = MockBackend(models=["mock-moe:8b-a1b"])
+    settings = RunSettings(models=["mock-moe:8b-a1b"], repetitions=1, warmup_runs=0, seed=7)
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
+    run = store.get_run(outcome.run_id)
+    assert run["suite_version"] == "9.9.9"
+    assert run["engine"] == "mock"
+    assert '"seed": 7' in run["config_json"]
+    assert run["machine_json"]
+    assert run["preflight_json"]
+    (model_row,) = store.run_models(outcome.run_id)
+    assert model_row["is_moe"] == 1
+    assert model_row["residency_json"]
+
+
+def test_options_are_passed_to_the_backend(store):
+    backend = MockBackend(models=["m:1b"])
+    settings = RunSettings(
+        models=["m:1b"],
+        repetitions=1,
+        warmup_runs=0,
+        temperature=0.3,
+        seed=11,
+        max_output_tokens=64,
+        context_length=4096,
+    )
+    BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
+    options = backend.calls[0]["options"]
+    assert options == {"temperature": 0.3, "num_predict": 64, "num_ctx": 4096, "seed": 11}
+
+
+def test_task_overrides_beat_run_settings():
+    settings = RunSettings(
+        models=["m"], temperature=0.0, max_output_tokens=100, context_length=2048
+    )
+    task = Task(
+        id="x",
+        category="coding",
+        title="x",
+        prompt="p",
+        validator={"kind": "exact", "expected": "y"},
+        max_output_tokens=777,
+        context_length=16384,
+        temperature=0.9,
+    )
+    options = build_options(settings, task)
+    assert options["num_predict"] == 777
+    assert options["num_ctx"] == 16384
+    assert options["temperature"] == 0.9
+
+
+def test_seed_can_be_disabled():
+    settings = RunSettings(models=["m"], seed=None)
+    task = Task(
+        id="x",
+        category="coding",
+        title="x",
+        prompt="p",
+        validator={"kind": "exact", "expected": "y"},
+    )
+    assert "seed" not in build_options(settings, task)
+
+
+def test_generation_failure_is_recorded_and_counted(store):
+    backend = MockBackend(models=["bad:1b"], fail_models={"bad:1b"})
+    settings = RunSettings(models=["bad:1b"], repetitions=1, warmup_runs=0)
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
+    assert outcome.status == "completed_with_errors"
+    assert outcome.failures == 2
+    rows = store.attempts(outcome.run_id)
+    assert all(row["ok"] == 0 for row in rows)
+    assert all(row["score"] == 0.0 for row in rows)
+
+
+def test_preflight_failure_aborts_without_force(store, monkeypatch):
+    monkeypatch.setattr(
+        BenchmarkRunner,
+        "preflight",
+        lambda self: safety_mod.PreflightResult(
+            checks=[safety_mod.Check("gpu_utilization", False, "GPU busy")]
+        ),
+    )
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0)
+    runner = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS)
+    with pytest.raises(RunAborted):
+        runner.run(tiny_suite())
+    assert store.list_runs() == []
+
+
+def test_force_overrides_preflight_failure(store, monkeypatch):
+    monkeypatch.setattr(
+        BenchmarkRunner,
+        "preflight",
+        lambda self: safety_mod.PreflightResult(
+            checks=[safety_mod.Check("gpu_utilization", False, "GPU busy")]
+        ),
+    )
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0, force=True)
+    runner = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS)
+    outcome = runner.run(tiny_suite())
+    assert outcome.attempts == 2
+
+
+def test_preloaded_model_is_never_unloaded(store):
+    backend = MockBackend(models=["resident:1b"])
+    backend._loaded.add("resident:1b")
+    settings = RunSettings(
+        models=["resident:1b"], repetitions=1, warmup_runs=0, unload_after_run=True
+    )
+    BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
+    assert backend.is_loaded("resident:1b")
+
+
+def test_model_loaded_by_the_run_is_unloaded_afterwards(store):
+    backend = MockBackend(models=["fresh:1b"])
+    settings = RunSettings(models=["fresh:1b"], repetitions=1, warmup_runs=0, unload_after_run=True)
+    BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
+    assert not backend.is_loaded("fresh:1b")
+
+
+def test_no_unload_keeps_the_model_resident(store):
+    backend = MockBackend(models=["fresh:1b"])
+    settings = RunSettings(
+        models=["fresh:1b"], repetitions=1, warmup_runs=0, unload_after_run=False
+    )
+    BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
+    assert backend.is_loaded("fresh:1b")
+
+
+def test_code_execution_tasks_are_skipped_by_default(store):
+    suite = Suite(
+        name="t",
+        suite_version="1",
+        tasks=[
+            Task(
+                id="c.exec",
+                category="coding",
+                title="exec",
+                prompt="write code",
+                validator={
+                    "kind": "python_cases",
+                    "cases": [{"name": "a", "expression": "f()", "expected": 1}],
+                },
+                requires_code_execution=True,
+            )
+        ],
+    )
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0)
+    outcome = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS).run(suite)
+    (row,) = store.attempts(outcome.run_id)
+    assert row["graded"] == "skipped"
+
+
+def test_task_and_category_selection(store):
+    settings = RunSettings(models=["m:1b"], categories=["agent"], repetitions=1, warmup_runs=0)
+    runner = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS)
+    assert [t.id for t in runner.select_tasks(tiny_suite())] == ["t.rubric"]
+
+    settings.categories = []
+    settings.task_ids = ["t.exact"]
+    assert [t.id for t in runner.select_tasks(tiny_suite())] == ["t.exact"]
+
+    settings.task_ids = ["nope"]
+    with pytest.raises(KeyError):
+        runner.select_tasks(tiny_suite())
+
+
+def test_long_context_filler_is_substituted_and_deterministic(store):
+    suite = Suite(
+        name="t",
+        suite_version="1",
+        tasks=[
+            Task(
+                id="lc.x",
+                category="long_context",
+                title="lc",
+                prompt="BEGIN {{FILLER}} END",
+                validator={"kind": "exact", "expected": "x"},
+                filler_tokens=200,
+            )
+        ],
+    )
+    backend = MockBackend(models=["m:1b"])
+    settings = RunSettings(models=["m:1b"], repetitions=2, warmup_runs=0)
+    BenchmarkRunner(backend, store, settings, THRESHOLDS).run(suite)
+    prompts = [c["prompt"] for c in backend.calls]
+    assert "{{FILLER}}" not in prompts[0]
+    assert len(prompts[0]) > 500
+    assert prompts[0] == prompts[1]  # same seed -> identical context
+
+
+def test_interrupt_stops_but_keeps_completed_attempts(store, monkeypatch):
+    backend = MockBackend(models=["m:1b"])
+    settings = RunSettings(models=["m:1b"], repetitions=5, warmup_runs=0)
+    runner = BenchmarkRunner(backend, store, settings, THRESHOLDS)
+    calls = {"n": 0}
+
+    def stop_after_three() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 3
+
+    monkeypatch.setattr("caliper.runner._interrupt_guard", lambda: stop_after_three)
+    outcome = runner.run(tiny_suite())
+    assert outcome.status == "interrupted"
+    assert 0 < len(store.attempts(outcome.run_id)) < 10
+    assert store.get_run(outcome.run_id)["status"] == "interrupted"
+
+
+def test_unknown_model_is_skipped_not_fatal(store):
+    class Broken(MockBackend):
+        def describe_model(self, model):
+            if model == "ghost:1b":
+                raise RuntimeError("no such model")
+            return super().describe_model(model)
+
+    backend = Broken(models=["m:1b"])
+    settings = RunSettings(models=["ghost:1b", "m:1b"], repetitions=1, warmup_runs=0)
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(tiny_suite())
+    assert outcome.skipped_models == ["ghost:1b"]
+    assert outcome.attempts == 2
+
+
+def test_estimate_run_cost_counts_warmups():
+    settings = RunSettings(models=["a", "b"], repetitions=3, warmup_runs=1)
+    tasks = tiny_suite().tasks
+    cost = estimate_run_cost(settings, tasks, seconds_per_attempt=10.0)
+    assert cost["attempts_per_model"] == 7
+    assert cost["total_attempts"] == 14
+    assert cost["estimated_minutes"] == pytest.approx(140 / 60)
+
+
+def test_real_suite_loads_and_every_validator_kind_is_known():
+    from caliper.evals.validators import available_validators
+
+    suite = load_suite("v1")
+    known = set(available_validators())
+    assert suite.tasks
+    for task in suite.tasks:
+        assert task.validator["kind"] in known, task.id

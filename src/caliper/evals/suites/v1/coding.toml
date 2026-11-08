@@ -1,0 +1,129 @@
+suite_version = "1.0.1"
+
+[[task]]
+id = "coding.rle_encode"
+category = "coding"
+title = "Implement run-length encoding with an exact signature"
+prompt = """Write a Python function with this exact signature:
+
+    def rle_encode(data: str) -> list[tuple[str, int]]:
+
+It returns a list of (character, run_length) tuples for consecutive runs in `data`.
+An empty string returns an empty list. Preserve the original order and treat
+uppercase and lowercase as different characters.
+
+Reply with a single Python code block and no prose."""
+max_output_tokens = 500
+requires_code_execution = true
+
+[task.validator]
+kind = "python_cases"
+timeout_s = 15.0
+cases = [
+  { name = "empty", expression = "rle_encode('')", expected = [] },
+  { name = "single", expression = "rle_encode('a')", expected = [["a", 1]] },
+  { name = "runs", expression = "rle_encode('aaabbbbc')", expected = [["a", 3], ["b", 4], ["c", 1]] },
+  { name = "case_sensitive", expression = "rle_encode('aAa')", expected = [["a", 1], ["A", 1], ["a", 1]] },
+  { name = "alternating", expression = "rle_encode('abab')", expected = [["a", 1], ["b", 1], ["a", 1], ["b", 1]] },
+]
+
+[[task]]
+id = "coding.debug_offbyone"
+category = "coding"
+title = "Find and fix an off-by-one plus a mutation bug"
+prompt = """This function is supposed to return a new list containing a moving
+average over a window of `k` values, with one output value per complete window.
+It has two defects.
+
+    def moving_average(values, k):
+        out = values
+        for i in range(len(values) - k):
+            window = values[i:i + k]
+            out.append(sum(window) / k)
+        return out
+
+State plainly what each defect is, then give the corrected function in a single
+Python code block. Keep the same name and parameters."""
+max_output_tokens = 700
+requires_code_execution = true
+
+[task.validator]
+kind = "python_cases"
+timeout_s = 15.0
+cases = [
+  { name = "basic", expression = "moving_average([1, 2, 3, 4], 2)", expected = [1.5, 2.5, 3.5] },
+  { name = "k_equals_len", expression = "moving_average([2, 4], 2)", expected = [3.0] },
+  { name = "no_input_mutation", expression = "(lambda v: (moving_average(v, 2), v)[1])([1, 2, 3])", expected = [1, 2, 3] },
+  { name = "window_three", expression = "moving_average([1, 1, 1, 7], 3)", expected = [1.0, 3.0] },
+]
+
+[[task]]
+id = "coding.comprehension_behaviour"
+category = "coding"
+title = "Predict the exact output of a subtle snippet"
+prompt = """What does this program print? Give only the printed lines, nothing else.
+
+    def build(n):
+        fns = []
+        for i in range(n):
+            fns.append(lambda: i)
+        return fns
+
+    print([f() for f in build(3)])
+    d = {'a': 1}
+    e = d
+    e['b'] = 2
+    print(sorted(d.items()))
+"""
+max_output_tokens = 200
+
+[task.validator]
+kind = "contains_all"
+needles = ["[2, 2, 2]", "[('a', 1), ('b', 2)]"]
+
+[[task]]
+id = "coding.test_generation"
+category = "coding"
+title = "Generate pytest cases for a specified function"
+prompt = """Here is a function:
+
+    def clamp(value: float, low: float, high: float) -> float:
+        \"\"\"Return value constrained to [low, high]. Raises ValueError if low > high.\"\"\"
+
+Write pytest tests for it. Cover: a value inside the range, a value below low,
+a value above high, value exactly equal to each bound, and the ValueError case.
+Use `pytest.raises` for the error case. Reply with a single Python code block."""
+max_output_tokens = 600
+
+[task.validator]
+kind = "regex_all"
+patterns = [
+  "import pytest",
+  "def test_",
+  "pytest\\.raises\\(\\s*ValueError",
+  "clamp\\(",
+]
+pass_threshold = 1.0
+
+[[task]]
+id = "coding.refactor_decision"
+category = "coding"
+title = "Judge a refactoring proposal"
+prompt = """A colleague proposes replacing every `if/elif` dispatch in a codebase
+with a plugin registry loaded from entry points, including one function that
+dispatches on exactly two cases that have not changed in two years.
+
+Give your recommendation in at most 150 words. Say explicitly whether the
+two-case function should be converted, and name the main cost of the registry
+approach."""
+max_output_tokens = 400
+
+[task.validator]
+kind = "rubric"
+criteria = [
+  "Recommends NOT converting the stable two-case dispatch (1 point)",
+  "Names a concrete cost of the registry: indirection, harder static analysis, load-time failure modes, or debugging difficulty (1 point)",
+  "Stays within roughly the 150-word limit (1 point)",
+  "Does not simply agree with the proposal uncritically (1 point)",
+]
+signal_phrases = ["two", "indirection", "complexity", "entry point", "overhead"]

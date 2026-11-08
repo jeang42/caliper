@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+# Local results & generated artifacts
+data/
+reports/*.md
+reports/*.json
+reports/*.csv
+inventory/
+*.sqlite
+*.sqlite3
+*.db
+.env

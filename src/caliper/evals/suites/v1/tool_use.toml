@@ -1,0 +1,143 @@
+suite_version = "1.0.1"
+
+# Tool-use tasks are simulated: the tools are declared to the model but never
+# executed. Grading covers function selection and argument correctness only.
+# Multi-step workflows are evaluated as a written plan until a real tool loop
+# exists (see docs/ROADMAP.md).
+
+[[task]]
+id = "tool.select_single"
+category = "tool_use"
+title = "Choose the correct tool and fill its arguments"
+prompt = "What is the current GPU memory usage on host ada, in mebibytes?"
+system = "You have tools available. When a tool can answer the question, call it rather than guessing."
+max_output_tokens = 300
+
+[[task.tools]]
+type = "function"
+
+[task.tools.function]
+name = "get_gpu_metrics"
+description = "Read live GPU telemetry for a host."
+
+[task.tools.function.parameters]
+type = "object"
+required = ["host", "unit"]
+
+[task.tools.function.parameters.properties.host]
+type = "string"
+description = "Hostname to query."
+
+[task.tools.function.parameters.properties.unit]
+type = "string"
+enum = ["MiB", "GiB"]
+description = "Unit for memory values."
+
+[[task.tools]]
+type = "function"
+
+[task.tools.function]
+name = "list_models"
+description = "List models installed on a host."
+
+[task.tools.function.parameters]
+type = "object"
+required = ["host"]
+
+[task.tools.function.parameters.properties.host]
+type = "string"
+
+[task.validator]
+kind = "tool_call"
+expected_function = "get_gpu_metrics"
+expected_arguments = { host = "ada", unit = "MiB" }
+forbid_extra_calls = true
+
+[[task]]
+id = "tool.numeric_arguments"
+category = "tool_use"
+title = "Convert a stated interval into the correct argument type"
+prompt = "Start a benchmark on model qwen3-coder:30b with three repetitions and a two minute timeout."
+system = "You have tools available. Call a tool when one applies. Convert units as the schema requires."
+max_output_tokens = 300
+
+[[task.tools]]
+type = "function"
+
+[task.tools.function]
+name = "start_benchmark"
+description = "Queue a benchmark run."
+
+[task.tools.function.parameters]
+type = "object"
+required = ["model", "repetitions", "timeout_seconds"]
+
+[task.tools.function.parameters.properties.model]
+type = "string"
+
+[task.tools.function.parameters.properties.repetitions]
+type = "integer"
+
+[task.tools.function.parameters.properties.timeout_seconds]
+type = "integer"
+description = "Per-request timeout in SECONDS."
+
+[task.validator]
+kind = "tool_call"
+expected_function = "start_benchmark"
+expected_arguments = { model = "qwen3-coder:30b", repetitions = 3, timeout_seconds = 120 }
+numeric_tolerance = 0.0
+
+[[task]]
+id = "tool.abstain_when_unavailable"
+category = "tool_use"
+title = "Do not call an unsuitable tool"
+prompt = "What was yesterday's average token throughput across all my benchmark runs?"
+system = """You have tools available. Call a tool only when it can actually answer
+the question. If no available tool can answer it, do not call any tool: reply in
+plain text explaining what is missing."""
+max_output_tokens = 300
+
+[[task.tools]]
+type = "function"
+
+[task.tools.function]
+name = "get_gpu_metrics"
+description = "Read live, current GPU telemetry for a host. Has no historical data."
+
+[task.tools.function.parameters]
+type = "object"
+required = ["host"]
+
+[task.tools.function.parameters.properties.host]
+type = "string"
+
+[task.validator]
+kind = "rubric"
+criteria = [
+  "Emitted no tool call (1 point) - check the stored tool_calls field, which must be empty",
+  "States that no available tool holds historical run data (1 point)",
+  "Does not fabricate a throughput number (1 point)",
+]
+signal_phrases = ["no tool", "historical", "cannot", "current"]
+
+[[task]]
+id = "tool.multistep_plan"
+category = "tool_use"
+title = "Order a multi-step tool workflow"
+prompt = """You can call these tools: `check_resources(host)`, `pull_model(name)`,
+`run_benchmark(model, suite)`, and `write_report(run_id)`.
+
+A model that is not yet installed needs to be benchmarked, and the host is
+shared with other workloads. List the tool calls you would make, in order, one
+per line, in the form `tool_name(arguments)`. Output only the list."""
+max_output_tokens = 300
+
+[task.validator]
+kind = "regex_all"
+patterns = [
+  "(?s)check_resources.*pull_model",
+  "(?s)pull_model.*run_benchmark",
+  "(?s)run_benchmark.*write_report",
+]
+pass_threshold = 1.0

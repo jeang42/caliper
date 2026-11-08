@@ -1,0 +1,102 @@
+suite_version = "1.0.1"
+
+[[task]]
+id = "instruction.exact_format"
+category = "instruction_following"
+title = "Produce an exact single-line output"
+prompt = """Output exactly the following line and nothing else. No preamble, no
+code fence, no trailing commentary, no quotation marks:
+
+STATUS=ready;RETRIES=0;MODE=serial"""
+max_output_tokens = 100
+
+[task.validator]
+kind = "exact"
+expected = "STATUS=ready;RETRIES=0;MODE=serial"
+case_sensitive = true
+
+[[task]]
+id = "instruction.json_schema_report"
+category = "instruction_following"
+title = "Emit JSON matching a given schema"
+prompt = """Return a single JSON object and nothing else (no code fence, no prose)
+describing this benchmark run:
+
+  The run used the model "demo:8b" on engine "ollama", completed 12 of 14 tasks,
+  and the status is "partial".
+
+Required shape:
+  {
+    "model": string,
+    "engine": string,
+    "tasks_completed": integer,
+    "tasks_total": integer,
+    "status": one of "ok", "partial", "failed"
+  }
+
+Include no other keys."""
+max_output_tokens = 300
+
+[task.validator]
+kind = "json_schema"
+expected_values = { model = "demo:8b", engine = "ollama", tasks_completed = 12, tasks_total = 14, status = "partial" }
+
+[task.validator.schema]
+type = "object"
+required = ["model", "engine", "tasks_completed", "tasks_total", "status"]
+additionalProperties = false
+
+[task.validator.schema.properties.model]
+type = "string"
+
+[task.validator.schema.properties.engine]
+type = "string"
+
+[task.validator.schema.properties.tasks_completed]
+type = "integer"
+minimum = 0
+
+[task.validator.schema.properties.tasks_total]
+type = "integer"
+minimum = 0
+
+[task.validator.schema.properties.status]
+type = "string"
+enum = ["ok", "partial", "failed"]
+
+[[task]]
+id = "instruction.multi_constraint"
+category = "instruction_following"
+title = "Satisfy several simultaneous constraints"
+prompt = """Write about why benchmark runs should be serialized on a shared GPU.
+
+Constraints, all of which apply at once:
+- Exactly three sentences.
+- Every sentence must begin with the word "Serial".
+- Do not use the words "fast" or "slow" anywhere.
+- End the final sentence with the token [END]."""
+max_output_tokens = 400
+
+[task.validator]
+kind = "regex_all"
+patterns = [
+  "\\A\\s*Serial",
+  "(?s)\\[END\\]\\s*\\Z",
+  "(?s)\\A(?:(?!\\bfast\\b).)*\\Z",
+  "(?s)\\A(?:(?!\\bslow\\b).)*\\Z",
+]
+pass_threshold = 1.0
+
+[[task]]
+id = "instruction.negative_constraint"
+category = "instruction_following"
+title = "Honour a prohibition while still answering"
+prompt = """Name the two resources that most often limit local LLM inference.
+Answer in one line of at most 12 words. Do not use the letter "e" anywhere in
+your answer."""
+max_output_tokens = 150
+
+[task.validator]
+kind = "regex_all"
+patterns = ["(?si)\\A[^e]*\\Z"]
+pass_threshold = 1.0

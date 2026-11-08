@@ -1,0 +1,103 @@
+suite_version = "1.0.1"
+
+[[task]]
+id = "reasoning.schedule_constraints"
+category = "reasoning"
+title = "Constraint satisfaction over a small schedule"
+prompt = """Four maintenance jobs (A, B, C, D) must run in four consecutive
+one-hour slots, one job per slot. The constraints are:
+
+1. A runs before C.
+2. B does not run in slot 1 or slot 4.
+3. D runs immediately after C.
+4. B runs before D.
+
+Work out the single valid ordering. End your reply with exactly:
+Answer: <slot1>,<slot2>,<slot3>,<slot4>"""
+max_output_tokens = 900
+
+[task.validator]
+kind = "choice"
+answer_pattern = "answer\\s*[:\\-]\\s*([A-D](?:\\s*,\\s*[A-D]){3})"
+expected = "A,B,C,D"
+
+[[task]]
+id = "reasoning.rate_arithmetic"
+category = "reasoning"
+title = "Multi-step rate and unit reasoning"
+prompt = """A model generates 48 tokens per second. A request has a 3,200-token
+prompt which is processed at 800 tokens per second, and the model then generates
+600 tokens. Model loading adds 4.5 seconds because the model is cold.
+
+What is the total wall-clock time in seconds? Show your steps, then end with
+exactly:
+Answer: <number>"""
+max_output_tokens = 600
+
+[task.validator]
+kind = "numeric"
+expected = 21.0
+tolerance = 0.11
+use = "last"
+
+[[task]]
+id = "reasoning.error_detection"
+category = "reasoning"
+title = "Spot the invalid step in an argument"
+prompt = """Read this argument:
+
+  Step 1: Every model that fits entirely in VRAM is fast.
+  Step 2: Model X does not fit entirely in VRAM.
+  Step 3: Therefore model X is not fast.
+
+Exactly one step makes the conclusion invalid. Name the logical error and say
+which step number is unjustified. End with exactly:
+Answer: <step number>"""
+max_output_tokens = 500
+
+[task.validator]
+kind = "choice"
+answer_pattern = "answer\\s*[:\\-]\\s*(?:step\\s*)?(\\d)"
+expected = "3"
+
+[[task]]
+id = "reasoning.memory_budget"
+category = "reasoning"
+title = "Structured problem-solving with a hard budget"
+prompt = """You have 32 GB of VRAM, of which 1.5 GB is already in use by another
+process. A model's weights occupy 18.5 GB. Its KV cache costs 0.25 GB per 1,000
+tokens of context.
+
+What is the largest context length, rounded down to the nearest 1,000 tokens,
+that still leaves at least 2 GB of VRAM free? Show your working, then end with
+exactly:
+Answer: <number>"""
+max_output_tokens = 700
+
+[task.validator]
+kind = "numeric"
+expected = 40000
+tolerance = 0.5
+use = "last"
+
+[[task]]
+id = "reasoning.tradeoff_explanation"
+category = "reasoning"
+title = "Explain a non-obvious performance trade-off"
+prompt = """A sparse mixture-of-experts model with 36 billion total parameters
+and 3 billion active parameters per token is compared with a dense 32 billion
+parameter model at the same quantization.
+
+In at most 180 words, explain which one is likely to generate tokens faster and
+which one is likely to need more memory, and why those two answers differ."""
+max_output_tokens = 500
+
+[task.validator]
+kind = "rubric"
+criteria = [
+  "Says the MoE model generates faster because only a few experts are active per token (1 point)",
+  "Says memory is driven by total parameters, so the MoE model needs similar or more memory (1 point)",
+  "Explicitly connects the difference to compute-per-token versus resident weights (1 point)",
+  "No factual error about MoE routing (1 point)",
+]
+signal_phrases = ["active", "expert", "total parameters", "memory", "per token"]

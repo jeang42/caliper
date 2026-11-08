@@ -1,0 +1,95 @@
+# Caliper configuration example.
+#
+# Every key below is optional; omitted keys keep their built-in default
+# (see src/caliper/config.py). Use with:
+#   caliper --config configs/caliper.example.toml preflight
+# or set CALIPER_CONFIG=/path/to/this/file
+
+[paths]
+# Where the SQLite database lives. Relative paths resolve against the current
+# working directory. CALIPER_HOME overrides this entirely.
+data_dir = "data"
+db_name = "caliper.sqlite"
+
+[engines.ollama]
+base_url = "http://127.0.0.1:11434"
+# Generation requests can legitimately take minutes on a large model.
+request_timeout_s = 600.0
+# Short timeout for cheap metadata calls (/api/version, /api/tags, /api/ps).
+connect_timeout_s = 10.0
+
+[engines.vllm]
+# Placeholder. The vLLM adapter is not implemented yet (see docs/ROADMAP.md).
+base_url = "http://127.0.0.1:8000"
+request_timeout_s = 600.0
+
+[safety]
+# A run is refused when any of these blocking checks fails. Raise them on a
+# dedicated box; lower them only if you accept noisy measurements.
+
+# Mean GPU utilization, sampled gpu_sample_count times, must be at or below
+# this. Protects other people's work and keeps measurements meaningful.
+max_gpu_utilization_pct = 25.0
+
+# Free VRAM required before starting. Set this above the resident size of the
+# largest model in the run.
+min_free_vram_mib = 20000.0
+
+# Available system RAM required, which matters when a model is offloaded.
+min_free_ram_mib = 16000.0
+
+# Free disk required. Results are small; this guards the host, not Caliper.
+min_free_disk_gib = 50.0
+
+# Pre-existing GPU processes are never disturbed. When true they are reported
+# as a note and tolerated up to max_foreign_gpu_mib; above that the run is
+# blocked, because the remaining VRAM is not really yours.
+allow_foreign_gpu_processes = true
+max_foreign_gpu_mib = 4096.0
+
+# GPU utilization is averaged over this many samples, this far apart, so a
+# transient spike neither blocks a run nor hides a busy GPU.
+gpu_sample_count = 3
+gpu_sample_interval_s = 1.0
+
+[run]
+# Experimental controls. Every value here is stored with the run.
+
+# Warmup attempts per model, recorded and flagged, excluded from aggregates.
+warmup_runs = 1
+
+# Measured repetitions of every task. Three is the minimum that gives any
+# sense of spread; raise it for throughput work.
+repetitions = 3
+
+# 0.0 for reproducible grading. Note that temperature 0 is not a guarantee of
+# determinism on all engines.
+temperature = 0.0
+
+# Passed to the engine as `seed`. Set to a negative value on the CLI
+# (--seed -1) to omit seeding entirely.
+seed = 42
+
+# Ollama `num_predict`. Per-task values in the suite override this.
+max_output_tokens = 512
+
+# Ollama `num_ctx`. Raising this increases KV cache VRAM and can push a model
+# off the GPU, which is itself worth measuring.
+context_length = 8192
+
+# How long the engine keeps the model resident after a request.
+keep_alive = "5m"
+
+# Unload models that Caliper itself loaded once their run finishes. Models that
+# were already resident are never unloaded, whatever this is set to.
+unload_after_run = true
+
+# Per-request timeout.
+request_timeout_s = 300.0
+
+# Telemetry sampling interval. nvidia-smi costs ~20-40 ms per call, so values
+# below about 0.2 s buy nothing.
+telemetry_interval_s = 0.25
+
+# Default evaluation suite.
+suite = "v1"

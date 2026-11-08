@@ -1,0 +1,85 @@
+suite_version = "1.0.1"
+
+# The filler placeholder {{FILLER}} is replaced at run time with deterministic,
+# original generated prose (see evals/longctx.py). filler_tokens sets the
+# approximate size; the actual prompt token count is recorded per run from the
+# engine's own accounting.
+
+[[task]]
+id = "longctx.retrieve_fact"
+category = "long_context"
+title = "Retrieve one fact from a long document"
+filler_tokens = 4000
+prompt = """Below is an operations log. Read it and answer the question after it.
+
+--- BEGIN LOG ---
+{{FILLER}}
+Entry 9001. The shard router was pinned to firmware revision R-4471 during the
+audit window, and that revision has not been changed since.
+{{FILLER}}
+--- END LOG ---
+
+Question: which firmware revision was the shard router pinned to during the
+audit window? End your reply with exactly:
+Answer: <revision>"""
+max_output_tokens = 200
+context_length = 16384
+
+[task.validator]
+kind = "choice"
+answer_pattern = "answer\\s*[:\\-]\\s*(R-?\\s*4471)"
+expected = "r-4471"
+
+[[task]]
+id = "longctx.relate_distant"
+category = "long_context"
+title = "Relate two facts placed far apart"
+filler_tokens = 5000
+prompt = """Below is an operations log. Read it and answer the question after it.
+
+--- BEGIN LOG ---
+Entry 0001. The cache layer was given a hard ceiling of 12 gibibytes at
+installation, and this ceiling was never raised.
+{{FILLER}}
+Entry 9002. A proposal was filed to grow the cache layer working set to 15
+gibibytes next quarter.
+--- END LOG ---
+
+Question: can the filed proposal be satisfied without any other change? Answer
+yes or no and give the two log entry numbers you used. End your reply with
+exactly:
+Answer: <yes or no>"""
+max_output_tokens = 400
+context_length = 16384
+
+[task.validator]
+kind = "choice"
+answer_pattern = "answer\\s*[:\\-]\\s*(yes|no)"
+expected = "no"
+
+[[task]]
+id = "longctx.embedded_instruction"
+category = "long_context"
+title = "Follow a formatting instruction stated early in a long prompt"
+filler_tokens = 4000
+prompt = """Formatting rule, which applies to your entire reply: give your answer
+as a single line beginning with the prefix `RESULT: ` and nothing before it.
+
+Now read the log below.
+
+--- BEGIN LOG ---
+{{FILLER}}
+Entry 9003. Exactly seven retry-queue incidents were closed during the audit
+window.
+{{FILLER}}
+--- END LOG ---
+
+How many retry-queue incidents were closed during the audit window? Remember the
+formatting rule stated at the top."""
+max_output_tokens = 200
+context_length = 16384
+
+[task.validator]
+kind = "regex_all"
+patterns = ["(?m)^RESULT:\\s*(?:7|seven)\\b"]
+pass_threshold = 1.0
