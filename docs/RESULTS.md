@@ -41,10 +41,76 @@ tasks only.
 currently carries no information. The other five discriminate, with spreads of
 0.33 to 0.56.
 
-Suite `v2` replaces those three long-context tasks with eight harder ones and
-inherits the other five categories unchanged. **No model has been run against
-`v2`, so there is nothing to report for it here.** Stage `8a` in
-`scripts/benchmark-stage.sh` is the run that would produce it.
+## Suite v2: the harder long-context tasks did not help
+
+Measured 2026-11-08. Stage 8a, run `810b3fa6c8924e70`, 16.1 minutes, 125
+attempts, 0 failures, `num_ctx` 16384, 3 repetitions. Stage 8b, run
+`7f3d373f024a4fcf`, 1.5 minutes, 34 attempts, `num_ctx` 32768, 2 repetitions.
+Both re-graded from their stored responses under suite version 2.0.1; see the
+correction below.
+
+Suite `v2` replaces v1's three long-context tasks with eight that require
+multi-hop chains stated in reverse order, aggregation over the whole document,
+resolving two supersessions, rejecting near-identical distractors, reporting an
+absent fact, reconstructing an order, arithmetic over scattered figures, and a
+formatting rule stated once before the document. Per-task mean score:
+
+| Task | gpt-oss:20b | qwen3-coder:30b | qwen3.5:35b | glm-4.7-flash | qwen3.8:27b |
+|---|---|---|---|---|---|
+| `multi_hop_chain` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `resolve_supersession` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `count_markers` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `distractor_precision` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `event_ordering` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `sum_scattered` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `absent_fact` | 1.00 | 1.00 | 1.00 | **0.67** | 1.00 |
+| `embedded_instruction_deep` | 1.00 | 1.00 | 1.00 | **0.00** | 1.00 |
+| **category mean** | 1.00 | 1.00 | 1.00 | **0.83** | 1.00 |
+
+**The conclusion is negative: v2 is saturated too.** Four of the five models
+score 1.00 on all eight tasks. Harder task *structure* was the wrong
+hypothesis; these models solve multi-hop retrieval, whole-document
+aggregation, supersession and near-miss discrimination at this document size
+without difficulty.
+
+The single model below 1.00 fails for a reason that is not about long context.
+`glm-4.7-flash` does not stop reasoning: on `embedded_instruction_deep` it
+produced 45,995 characters of thinking and **no answer at all**, three times
+out of three, identically. A diagnostic run (`9967b2fe5d5d4689`) raised the
+budget from 4,096 to 12,288 tokens and it again produced exactly 45,995
+characters of thinking and an empty answer, stopping at the limit. So this is a
+genuine failure to terminate, not a budget artifact — the same behaviour
+`gpt-oss:20b` shows on v1's negative-constraint instruction tasks. Its 0.67 on
+`absent_fact` is one further truncation of the same kind.
+
+### Context length is not the explanation, and document length is still untested
+
+Stage 8b re-ran the same eight tasks at `num_ctx` 32768. Every score stayed
+1.00 for both models. This is consistent with stage 5: a larger window costs
+nothing in quality.
+
+It is **not** a test of longer documents, and an earlier note in this project
+said it was. `--context` raises `num_ctx` only; the documents are generated
+from each task's `filler_tokens` and stayed at roughly 9,200 prompt tokens in
+both runs. Whether these models degrade on a 30,000-token document is
+unmeasured, and nothing here speaks to it.
+
+### A validator correction
+
+`qwen3-coder:30b` answered `RESULT: 13 incidents.` three times out of three and
+was first scored 0.50, because the trailing full stop fell outside the
+pattern's `incidents\s*$` anchor. That is a correct answer marked a
+long-context failure over punctuation — the precise failure mode the task's own
+validator note said this category must avoid. Suite version 2.0.1 allows
+optional trailing punctuation, and both runs were re-graded from their stored
+responses: 5 attempts changed, 150 reproduced identically, no measurement
+altered. `qwen3-coder:30b`'s category mean went 0.94 to 1.00, which removed the
+last apparent discrimination other than glm's truncations.
+
+Both runs record `suite_version` 2.0.0, the version that graded them first,
+while their scores now come from 2.0.1. `/api/compare` will therefore call them
+not comparable with any future 2.0.1 run. That is the conservative direction,
+but it is a provenance wrinkle to know about.
 
 ## Performance
 
@@ -128,8 +194,9 @@ quality axis and truncated 30 of 75 attempts.
 
 - 45 rubric attempts are ungraded, so the agent, coding, reasoning and tool-use
   categories are currently measured by their automatic tasks only.
-- `long_context` discriminates nothing at present. Suite `v2` exists to fix
-  that and has not been measured.
+- `long_context` discriminates nothing at present, in `v1` or in `v2`. Both
+  are saturated at roughly 8,000-10,000-token documents; see the v2 section
+  above.
 - The v1 long-context documents are larger than the suite's `filler_tokens`
   settings suggest. Two of the three tasks use the `{{FILLER}}` placeholder
   twice and receive the same block both times, so the prompts above averaged

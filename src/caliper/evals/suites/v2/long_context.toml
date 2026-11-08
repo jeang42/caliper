@@ -1,4 +1,4 @@
-suite_version = "2.0.0"
+suite_version = "2.0.1"
 
 # Why these tasks look the way they do
 # ------------------------------------
@@ -331,10 +331,17 @@ context_length = 16384
 # value or the unit was wrong. Neither pattern checks that the reply contains
 # nothing else, because that is instruction-following rather than long-context
 # behaviour, and it has its own category.
+#
+# The trailing `[.!]?` was added in 2.0.1 after stage 8a: qwen3-coder:30b
+# answered `RESULT: 13 incidents.` three times out of three and scored 0.5,
+# because the full stop fell outside `incidents\s*$`. A correct answer was
+# being marked a long-context failure over punctuation - the exact thing the
+# validator note above says this category must not do. Stage 8a and 8b were
+# re-graded from their stored responses; no inference was repeated.
 [task.validator]
 kind = "regex_all"
 patterns = [
-  "(?mi)^RESULT:\\s*(?:13|thirteen)\\s+incidents\\s*$",
+  "(?mi)^RESULT:\\s*(?:13|thirteen)\\s+incidents\\s*[.!]?\\s*$",
   "(?mi)^RESULT:",
 ]
 pass_threshold = 1.0

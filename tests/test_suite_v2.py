@@ -36,7 +36,7 @@ def v2():
 
 
 def test_v2_inherits_every_category_it_does_not_replace(v1, v2):
-    assert v2.suite_version == "2.0.0"
+    assert v2.suite_version == "2.0.1"
     assert set(v2.categories) == set(CATEGORIES)
     inherited = {t.id for t in v2.tasks} - {t.id for t in v2.by_category([LONG_CTX])}
     assert inherited == {t.id for t in v1.tasks if t.category != LONG_CTX}
@@ -324,6 +324,15 @@ def test_correct_answers_survive_common_formatting_variation(v2):
             "Order: KAPPA, OMEGA, THETA, SIGMA",
             "Order: KAPPA -> OMEGA -> THETA -> SIGMA",
             "Order: kappa; omega; theta; sigma",
+        ],
+        # Regression, stage 8a: qwen3-coder:30b answered "RESULT: 13
+        # incidents." three times out of three and scored 0.5, because the
+        # full stop fell outside `incidents\s*$`. A correct answer was marked
+        # a long-context failure over punctuation.
+        "longctx.embedded_instruction_deep": [
+            "RESULT: 13 incidents",
+            "RESULT: 13 incidents.",
+            "RESULT: thirteen incidents!",
         ],
     }
     for task_id, texts in variants.items():

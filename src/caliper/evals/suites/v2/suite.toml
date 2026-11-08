@@ -1,4 +1,4 @@
-suite_version = "2.0.0"
+suite_version = "2.0.1"
 
 # v2 exists for one reason: in the five-model stage 3/4 comparison every model
 # scored 1.00 on every v1 long-context task, at every context length measured

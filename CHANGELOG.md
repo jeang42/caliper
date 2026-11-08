@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.3.1 — 2026-11-08
+
+Suite `v2` measured, in stages 8a and 8b. **The result is negative: `v2` is
+saturated too.** Full figures in [docs/RESULTS.md](docs/RESULTS.md).
+
+- Four of five models score 1.00 on all eight new long-context tasks, at
+  `num_ctx` 16384 and again at 32768. Harder task structure was the wrong
+  hypothesis: multi-hop chains in reverse order, whole-document aggregation,
+  supersession, near-miss distractors, absent facts, order reconstruction and
+  scattered arithmetic are all easy for these models at an 8,000-token
+  document.
+- The only model below 1.00, `glm-4.7-flash`, fails for a reason that is not
+  about long context: it does not stop reasoning. On
+  `longctx.embedded_instruction_deep` it produced 45,995 characters of
+  thinking and no answer, three times out of three; a diagnostic run tripled
+  the budget to 12,288 tokens and it produced exactly 45,995 characters again
+  and still no answer. A genuine failure to terminate, not a budget artifact.
+- **Validator fix, suite version 2.0.1.** `qwen3-coder:30b` answered
+  `RESULT: 13 incidents.` and scored 0.50, because the trailing full stop fell
+  outside the pattern's `incidents\s*$` anchor — a correct answer marked a
+  long-context failure over punctuation, which is exactly what the task's own
+  validator note said this category must not do. Optional trailing punctuation
+  is now allowed, both runs were re-graded from stored responses (5 attempts
+  changed, 150 reproduced identically, no measurement altered), and
+  `qwen3-coder:30b`'s category mean moved 0.94 to 1.00.
+- **A correction to an earlier claim in this project.** Stage 8b was described
+  as testing document length. It does not: `--context` raises `num_ctx`, which
+  is the window, while the document comes from each task's `filler_tokens` and
+  stayed at roughly 9,200 prompt tokens. Document length has never been varied
+  in any run — v1, v2 or stage 5 — and is now the top evaluation priority, with
+  a `--filler` override the cheapest way to get at it.
+- 245 tests.
+
 ## 0.3.0 — 2026-11-08
 
 Suite `v2`: a harder long-context category. **Nothing has been measured

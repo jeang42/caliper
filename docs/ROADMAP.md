@@ -8,25 +8,41 @@ roughly in the order it becomes worth building.
 **A CLI cross-run comparison.** `/api/compare` and the viewer do this already;
 `caliper compare --run A --run B` would make it available without a browser.
 
-**Harder long-context tasks — done, not yet measured.** With five models
-measured, five of the six categories discriminate with spreads of 0.33 to 0.56;
-only `long_context` was saturated, every model scoring 1.00 on all three tasks
-at every context length in stage 5, including the case where 29% of the model
-was offloaded. Suite `v2` replaces that category with eight harder tasks
-(multi-hop chains, aggregation over the whole document, superseded values,
-near-miss distractors, an absent fact, an order to reconstruct, arithmetic over
-scattered figures, and a formatting rule stated once before the document). The
-other five categories are inherited from `v1` unchanged, so they stay directly
-comparable to the stored runs. **No model has been run against `v2` yet**, so
-nothing is known about whether it discriminates; stage `8a` in
-`scripts/benchmark-stage.sh` is the run that would find out.
+**Harder long-context tasks — tried, and the hypothesis was wrong.** Suite
+`v2` replaced v1's three saturated long-context tasks with eight that need
+multi-hop chains in reverse order, whole-document aggregation, supersession,
+near-miss distractors, an absent fact, an order to reconstruct and arithmetic
+over scattered figures. Measured in stage 8a: four of five models score 1.00 on
+all eight, and the fifth fails only by never terminating. See
+[docs/RESULTS.md](RESULTS.md). Task *structure* is not what these models find
+hard at an 8,000-token document.
+
+**The one axis still untested: document length.** `filler_tokens` is a
+per-task TOML field with no command-line override, so every long-context
+measurement to date — v1, v2, and all of stage 5 — used documents of roughly
+8,000-10,000 tokens. Stage 5 and stage 8b varied `num_ctx`, which is the
+window, not the document. A `--filler` override, or a `v2` variant sized at
+30,000 and 60,000 tokens, would answer whether these models degrade with length
+and would cost about the same as stage 8a. This is now the highest-value
+evaluation work outstanding, ahead of writing more tasks of the same kind.
 
 **Camouflaged needles, as a possible `v3`.** `v2`'s needles use entry numbers
 in the 9000s, well above the filler's own numbering, so they are findable by
 their shape. That makes `v2` a test of retrieval and reasoning over a long
 document, not of search under camouflage. Blending needles into the filler's
 numbering would add that axis, and would need the filler generator to place
-them rather than the task author.
+them rather than the task author. Worth doing after the length axis, since
+length is the cheaper experiment and the more likely explanation.
+
+**Reasoning-budget exhaustion deserves its own measurement.** Two separate
+models have now been observed spending an entire output budget on reasoning
+and emitting no answer: `gpt-oss:20b` on v1's negative-constraint instruction
+tasks, and `glm-4.7-flash` on `longctx.embedded_instruction_deep`, which still
+produced exactly 45,995 characters of thinking and an empty answer when its
+budget was tripled to 12,288 tokens. This is a real operational property — the
+request costs full price and returns nothing — and it is currently visible only
+as a zero in a category mean plus a truncation count. It belongs in the report
+as a named failure mode.
 
 **Grow the other categories.** The remaining priorities are more
 partial-credit coding tasks, multi-turn instruction following, and the same
