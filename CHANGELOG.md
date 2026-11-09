@@ -30,7 +30,7 @@ variable for the first time. **Nothing has been measured with it yet**; stages
   document, so a larger document that introduced another escalated entry would
   score every model wrong for a suite bug — and that filler entry numbers stay
   clear of the needles' 9000s at every sweep size.
-- 261 tests.
+- 264 tests.
 
 ## 0.3.1 — 2026-11-08
 

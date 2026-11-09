@@ -4,6 +4,11 @@ name: CI
 # against recorded stream fixtures and the runner against the mock backend. So
 # CI needs nothing but a Python interpreter, and a failure here is a real
 # failure rather than a missing accelerator.
+# Read-only token: nothing here writes to the repository, publishes a package
+# or needs a secret.
+permissions:
+  contents: read
+
 on:
   push:
     branches: ["main"]

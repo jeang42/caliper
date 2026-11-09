@@ -151,7 +151,9 @@ baked into the code.
 ## Safety model
 
 `caliper run` runs `preflight` first and refuses to start when any blocking
-check fails. Thresholds are configurable:
+check fails. The defaults below are sized for the 32 GiB card this was
+developed against — a smaller GPU will be blocked by `min_free_vram_mib`
+until you lower it. Thresholds are configurable:
 
 | Check | Default | Severity |
 |---|---|---|

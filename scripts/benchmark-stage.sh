@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Run one approved benchmark stage from docs/CANDIDATES.md.
 #
+# The stages below name the models installed on the host this project was
+# developed against, and their --context/--filler sizes are chosen for a
+# 32 GiB card. On another machine they are a worked example rather than a
+# recipe: edit the model lists, or call `caliper run` directly.
+#
 # Each stage runs preflight first and aborts if the GPU is busy, prints the
 # plan, runs the benchmark, then writes a Markdown report and JSON/CSV exports
 # into reports/. Nothing is downloaded. Models already resident on the GPU are
