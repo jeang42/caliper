@@ -1,5 +1,7 @@
 # Caliper
 
+by [Jeff Angelcyk](https://nexurite.ai) · [![CI](https://github.com/jeang42/caliper/actions/workflows/ci.yml/badge.svg)](https://github.com/jeang42/caliper/actions/workflows/ci.yml)
+
 A local LLM benchmarking and evaluation framework. CLI-first, Ollama today, a
 vLLM adapter planned. Built to answer a practical question: *which locally
 installed model should I use for which job on this hardware?*
@@ -243,9 +245,19 @@ is not ground truth.
 - [CLAUDE.md](CLAUDE.md) — working agreement for coding agents: invariants,
   metric definitions, and the mistakes already made once
 
+## Contact
+
+For project matters, open an [issue](https://github.com/jeang42/caliper/issues).
+For anything else: [nexurite.ai](https://nexurite.ai).
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Licensed under the [MIT License](LICENSE).
+Copyright 2026 [Jeff Angelcyk](https://nexurite.ai).
+
+Fork, copy, modify and redistribute freely under those terms. Not published as
+a package on PyPI: this is an application and a measurement record, not a
+library. Install it from a clone.
 
 ## Development
 

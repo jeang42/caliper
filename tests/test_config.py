@@ -67,3 +67,38 @@ def test_the_changelog_documents_the_current_version():
 
     changelog = (Path(__file__).resolve().parents[1] / "CHANGELOG.md").read_text()
     assert f"## {caliper.__version__}" in changelog
+
+
+def test_pyproject_project_table_uses_only_standard_keys():
+    """An unknown key in [project] breaks the build, not the tests.
+
+    A stray `classifiers-note` was committed here once; `tomllib` parsed it
+    happily and every test passed, while `pip install -e .` failed with
+    "`project` must not contain {'classifiers-note'} properties". Validating
+    the key names catches it in a second rather than in CI's install step.
+    """
+    import tomllib
+
+    pep621 = {
+        "name",
+        "version",
+        "description",
+        "readme",
+        "requires-python",
+        "license",
+        "license-files",
+        "authors",
+        "maintainers",
+        "keywords",
+        "classifiers",
+        "urls",
+        "scripts",
+        "gui-scripts",
+        "entry-points",
+        "dependencies",
+        "optional-dependencies",
+        "dynamic",
+    }
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    project = tomllib.loads(pyproject.read_text())["project"]
+    assert set(project) <= pep621, set(project) - pep621

@@ -1,0 +1,11 @@
+Caliper
+Copyright 2026 Jeff Angelcyk
+
+The evaluation tasks under src/caliper/evals/suites/ are original content
+written for this project.
+
+The measured results in docs/RESULTS.md and the reports under reports/ are
+observations of third-party model weights (gpt-oss, Qwen3, GLM) served through
+Ollama on one specific host. They are provenance for those numbers on that
+hardware, not a claim about the models in general, and the model weights
+themselves are not part of this project or its license grant.
