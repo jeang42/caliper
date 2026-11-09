@@ -121,6 +121,13 @@ Break these and the output stops being evidence.
   window. Document size lives in the task's `filler_tokens` and moves only
   with `--filler`. A whole stage was described as a length test before this
   was noticed; length was in fact never varied until 0.4.0.
+- **One prompt-token estimate cannot serve every tokenizer.** The fit check's
+  1.3-per-filler-token constant refused a `glm-4.7-flash` diagnostic that
+  fitted with 3,500 tokens to spare, because glm's measured ratio is 1.051.
+  `Store.measured_prompt_token_ratio` supplies a per-model figure from runs
+  launched with `--filler`; the constant is the fallback, and the refusal
+  message names which was used. Do not tighten the constant to make a
+  specific run pass — measure the model instead.
 - **An oversized prompt is truncated silently.** Ollama's `num_ctx` covers the
   prompt and the generation together and drops the overflow without a word, so
   a document too large for its window yields a long-context score for a

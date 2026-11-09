@@ -30,6 +30,7 @@ from .runner import (
     RunSettings,
     estimate_run_cost,
     filler_fit_problems,
+    prompt_token_ratios,
 )
 from .server import serve
 from .storage import Store
@@ -182,7 +183,7 @@ def cmd_plan(args: argparse.Namespace, config: Config) -> int:
         print(f"\n{len(needs_exec)} task(s) will be SKIPPED without --allow-code-execution:")
         for t in needs_exec:
             print(f"  {t}")
-    fit = filler_fit_problems(settings, tasks)
+    fit = filler_fit_problems(settings, tasks, prompt_token_ratios(settings, store))
     if fit:
         print()
         print("Long-context documents that will NOT fit their context window:")

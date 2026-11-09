@@ -34,16 +34,18 @@ task out of eight, which is a thin instrument.
    reconciling two lists, finding the one inconsistency — would likely
    discriminate at ~17,000 tokens rather than needing 40,000, which matters
    because only two models here fit a 64k window.
-2. **A length curve, not two points.** 9a and 9b are two sizes. The shape
-   between them is unknown: the drop could be a cliff somewhere near 24,000
-   tokens or a slope. `--filler 24000 --context 49152` on `gpt-oss:20b` and
-   `qwen3-coder:30b` would cost about ten minutes and place the knee.
-3. **A per-model prompt-token ratio.** The fit guard assumes 1.3 prompt tokens
-   per filler token for every model. Measured ratios are 1.013 for
-   `gpt-oss:20b`, 1.051 for `glm-4.7-flash` and 1.14 for the qwen3 tokenizers,
-   so the guard refused a legitimate glm diagnostic that `--force` then ran
-   safely. Storing a measured ratio per model and using it when one exists
-   would remove the false refusal without weakening the check.
+2. ~~**A length curve, not two points.**~~ Done in stage 9c: `gpt-oss:20b`
+   holds 1.00 to ~24,200 tokens and breaks between there and ~40,000, while
+   `qwen3-coder:30b` slides from ~18,000 and fails consistently from ~27,000.
+   A slope for one model and a later cliff for the other. The remaining gap is
+   the other three models, which cannot reach a window past 32k without
+   offload, so their curve stops at ~19,000 tokens on this host.
+3. ~~**A per-model prompt-token ratio.**~~ Done: the fit guard now uses a
+   measured ratio per model where one exists, with 5% of slack, and falls
+   back to the 1.3 constant with a message saying so. Measured on this host:
+   1.019 `gpt-oss:20b`, 1.057 `glm-4.7-flash`, 1.143 `qwen3-coder:30b`, 1.178
+   the qwen3.5/qwen3.8 tokenizers. Only runs launched with `--filler` feed the
+   measurement, because only then is one document size true for every task.
 4. **Reasoning budget as a declared model property.** `glm-4.7-flash` needs
    3x the output budget other models finish inside, and recovers 4 of 5 failed
    tasks when given it. That is a measurable per-model number, not a suite

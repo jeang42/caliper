@@ -52,12 +52,13 @@ declare -A STAGES=(
   # close to the card's limit and may partially offload - which the report
   # records rather than hides.
   [9a]="long-document sweep: ~16k-token documents, all five models|--suite v2 --category long_context --model gpt-oss:20b --model qwen3-coder:30b --model qwen3.5:35b --model glm-4.7-flash:latest --model qwen3.8:27b --repetitions 2 --warmup 1 --filler 16000 --context 32768 --timeout 1800"
+  [9c]="long-document sweep: ~24k-token documents, placing the knee|--suite v2 --category long_context --model gpt-oss:20b --model qwen3-coder:30b --repetitions 2 --warmup 1 --filler 24000 --context 40960 --timeout 2400"
   [9b]="long-document sweep: ~40k-token documents, the two models that fit a 64k window|--suite v2 --category long_context --model gpt-oss:20b --model qwen3-coder:30b --repetitions 2 --warmup 1 --filler 40000 --context 65536 --timeout 2400"
 )
 
 if [[ "${1:-}" == "list" || -z "${1:-}" ]]; then
     echo "Stages (see docs/CANDIDATES.md for the rationale):"
-    for key in 1 2 3 4 5a 5b 5c 8a 8b 9a 9b; do
+    for key in 1 2 3 4 5a 5b 5c 8a 8b 9a 9c 9b; do
         printf "  %-3s %s\n" "$key" "${STAGES[$key]%%|*}"
     done
     echo

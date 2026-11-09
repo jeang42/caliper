@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0 — 2026-11-09
+
+Stage 9c places the knee, and the fit guard stops refusing runs that fit.
+
+- **The two models degrade at different document lengths**, which is the first
+  time this category has separated them. `gpt-oss:20b` holds 1.00 to ~24,200
+  prompt tokens and breaks between there and ~40,000. `qwen3-coder:30b` slides
+  earlier: one of two attempts at ~18,000, both failing from ~27,000. A slope
+  for one and a later cliff for the other, not a single threshold.
+- `qwen3-coder:30b` runs out of VRAM before it runs out of accuracy: 9%
+  offloaded at a 40,960 window (73.3 tok/s) and 29% at 65,536 (35.8 tok/s,
+  24-second TTFT) against 137.5 at 8k. Past ~24,000-token documents this host
+  is a `gpt-oss:20b` job on speed alone.
+- **The fit guard now uses a measured prompt-token ratio per model** where one
+  exists, with 5% of slack, and falls back to the 1.3 constant with a message
+  that says the model has no history. The constant refused a legitimate
+  `glm-4.7-flash` diagnostic in 0.5.0 that `--force` then ran safely; measured
+  ratios are 1.019 to 1.178 across the five models here, so one constant has
+  to assume the worst tokenizer and reject the best. Only runs launched with
+  `--filler` feed the measurement, because only then is one document size true
+  for every task.
+- Stage `9c` added to `scripts/benchmark-stage.sh`.
+- 268 tests.
+
 ## 0.5.0 — 2026-11-09
 
 **Document length is what degrades these models.** Stages 9a and 9b, plus a

@@ -617,3 +617,73 @@ def test_the_fit_check_counts_the_output_budget_too():
     settings = RunSettings(models=["m:1b"], filler_tokens_override=6200)
     # 6200 * 1.3 = 8060, under num_ctx 8192 on its own; with 256 output it is not.
     assert filler_fit_problems(settings, [task])
+
+
+def test_a_measured_ratio_replaces_the_pessimistic_constant(store):
+    """The constant refused a run that fitted. This is that incident.
+
+    The fit check assumed 1.3 prompt tokens per filler token for every model.
+    A glm-4.7-flash diagnostic at 16,000 filler tokens with a 12,288 output
+    budget was refused against num_ctx 32768 (1.3 x 16000 + 12288 = 33088),
+    but glm's measured ratio is 1.051, so the real total was about 29,100 and
+    it fitted with room to spare. It had to be run with --force.
+    """
+    suite = filler_suite(filler_tokens=1000, context_length=32768)
+    tasks = [suite.get("t.longctx")]
+    tasks[0].max_output_tokens = 12288
+    settings = RunSettings(models=["m:1b"], filler_tokens_override=16000)
+
+    assert filler_fit_problems(settings, tasks), "the constant should refuse this"
+    assert filler_fit_problems(settings, tasks, {"m:1b": 1.051}) == []
+
+
+def test_an_unmeasured_model_still_gets_the_conservative_constant(store):
+    """Mixing models must not let a measured one vouch for an unmeasured one."""
+    suite = filler_suite(filler_tokens=1000, context_length=32768)
+    tasks = [suite.get("t.longctx")]
+    tasks[0].max_output_tokens = 12288
+    settings = RunSettings(models=["measured:1b", "unknown:1b"], filler_tokens_override=16000)
+    problems = filler_fit_problems(settings, tasks, {"measured:1b": 1.051})
+    assert len(problems) == 1
+    assert "unknown:1b" in problems[0]
+    assert "no measured history" in problems[0]
+
+
+def test_the_measured_ratio_carries_a_safety_margin():
+    """A handful of attempts at one document size is not a guarantee.
+
+    1.24 x 16000 = 19,840, which fits 32768 beside a 12,288 budget by 640
+    tokens - but only until the 5% slack is applied. Without the margin a
+    marginal measurement would authorise a prompt that silently truncates.
+    """
+    suite = filler_suite(filler_tokens=1000, context_length=32768)
+    task = suite.get("t.longctx")
+    task.max_output_tokens = 12288
+    assert filler_fit_problems(
+        RunSettings(models=["m:1b"], filler_tokens_override=16000), [task], {"m:1b": 1.24}
+    )
+
+
+def test_prompt_token_ratios_reads_only_runs_that_used_an_override(store):
+    """Without --filler each task has its own size and the division is wrong.
+
+    A run at the tasks' own filler_tokens would divide a mixed-size document
+    by one number, producing a ratio that is not a tokenizer property at all.
+    """
+    backend = MockBackend(models=["m:1b"], default_answer="OK")
+    plain = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0)
+    BenchmarkRunner(backend, store, plain, THRESHOLDS).run(filler_suite(filler_tokens=1000))
+    assert store.measured_prompt_token_ratio("m:1b") is None
+
+    override = RunSettings(
+        models=["m:1b"],
+        repetitions=1,
+        warmup_runs=0,
+        filler_tokens_override=2000,
+        context_length_override=32768,
+    )
+    BenchmarkRunner(backend, store, override, THRESHOLDS).run(filler_suite(filler_tokens=1000))
+    measured = store.measured_prompt_token_ratio("m:1b")
+    assert measured is not None
+    ratio, n = measured
+    assert ratio > 0 and n >= 1

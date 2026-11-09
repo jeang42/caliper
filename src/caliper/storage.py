@@ -418,6 +418,46 @@ class Store:
             return None
         return float(row["spa"]), int(row["n"])
 
+    def measured_prompt_token_ratio(self, model: str) -> tuple[float, int] | None:
+        """Prompt tokens the engine counted per filler token requested, by model.
+
+        The fit check needs to know how large a document will actually be
+        before it is sent. A single constant has to assume the most verbose
+        tokenizer, which refuses runs that would have fitted: the measured
+        ratios here span 1.013 for ``gpt-oss:20b`` to 1.14 for the qwen3
+        tokenizers, so a 1.3 constant is 28% pessimistic for the former.
+
+        Only runs launched with ``--filler`` are counted, because there the
+        document size is one known number for every task. Without an override
+        each task carries its own ``filler_tokens`` and the division would
+        need the suite definition per attempt, which is more coupling than
+        this is worth. Dry runs are excluded: mock token counts are invented.
+
+        Returns None when the model has never run with an override.
+        """
+        rows = self._conn.execute(
+            """SELECT a.prompt_tokens AS pt, r.config_json AS cfg
+                 FROM attempts a JOIN runs r ON r.id = a.run_id
+                WHERE r.dry_run = 0 AND a.model = ? AND a.is_warmup = 0
+                      AND a.prompt_tokens IS NOT NULL AND a.ok = 1""",
+            (model,),
+        ).fetchall()
+        ratios = []
+        for row in rows:
+            try:
+                settings = (json.loads(row["cfg"]) or {}).get("settings", {})
+            except (TypeError, ValueError):
+                continue
+            filler = settings.get("filler_tokens_override")
+            if filler:
+                ratios.append(row["pt"] / float(filler))
+        if not ratios:
+            return None
+        # The maximum, not the mean: the guard's job is to refuse a document
+        # that will not fit, and the largest observed prompt for a given
+        # document size is the one that has to fit.
+        return max(ratios), len(ratios)
+
     def run_progress(self, run_id: str) -> dict[str, Any]:
         """Live progress counters for a run, safe to poll.
 

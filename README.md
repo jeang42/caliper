@@ -209,6 +209,13 @@ generation, and Ollama discards the overflow silently, so a run whose document
 cannot fit is refused rather than scored against a document the model never
 saw. `caliper plan` reports the same thing before any GPU time is spent.
 
+The check sizes the document from the model's own measured prompt-tokens-per-
+filler-token ratio when it has one, plus 5% of slack, and otherwise from a
+deliberately pessimistic constant that says so in the message. Tokenizers
+differ enough to matter: the five models measured here span 1.019 to 1.178
+prompt tokens per filler token, so a single constant must assume the most
+verbose one and would refuse runs that fit.
+
 Validators: `exact`, `contains_all`, `regex_all`, `choice`, `numeric`,
 `json_schema`, `tool_call`, `python_cases`, `rubric`.
 

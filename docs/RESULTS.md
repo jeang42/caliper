@@ -101,18 +101,29 @@ Measured 2026-11-09. Stage 9a, run `a81725976273479e`, 17.3 minutes, 85
 attempts, 0 failures, `--filler 16000 --context 32768`, 2 repetitions, five
 models. Stage 9b, run `65a2911f4f2f4b6f`, 34 attempts, 0 failures,
 `--filler 40000 --context 65536`, 2 repetitions, the two models whose weights
-leave room for a 64k window. Both under suite version 2.0.1.
+leave room for a 64k window. Stage 9c, run `bb9d5dba62e54ad6`, 34 attempts, 0
+failures, `--filler 24000 --context 40960`, 2 repetitions, the same two models,
+run to place the knee between 9a and 9b. All under suite version 2.0.1.
 
 Stages 9a and 9b varied the document itself with `--filler`. This is the one
 axis that produced a failure in a healthy model.
 
-| Model | ~9k doc (8a) | ~17-19k doc (9a) | ~40-45k doc (9b) |
-|---|---|---|---|
-| `gpt-oss:20b` | 1.00 | 1.00 | **0.88** |
-| `qwen3-coder:30b` | 1.00 | **0.94** | **0.88** |
-| `qwen3.5:35b` | 1.00 | 1.00 | not run (no 64k window) |
-| `qwen3.8:27b` | 1.00 | 1.00 | not run (no 64k window) |
-| `glm-4.7-flash` | 0.83 | 0.56 | not run (no 64k window) |
+| Model | ~9k doc (8a) | ~17-19k doc (9a) | ~24-27k doc (9c) | ~40-45k doc (9b) |
+|---|---|---|---|---|
+| `gpt-oss:20b` | 1.00 | 1.00 | 1.00 | **0.88** |
+| `qwen3-coder:30b` | 1.00 | **0.94** | **0.88** | **0.88** |
+| `qwen3.5:35b` | 1.00 | 1.00 | not run | not run (no 64k window) |
+| `qwen3.8:27b` | 1.00 | 1.00 | not run | not run (no 64k window) |
+| `glm-4.7-flash` | 0.83 | 0.56 | not run | not run (no 64k window) |
+
+**The two models degrade at different lengths, and that is the useful part.**
+`qwen3-coder:30b` slides: perfect at ~9,500 tokens, then one of two attempts
+at ~18,000, then both attempts failing from ~27,000 onward. `gpt-oss:20b`
+holds 1.00 all the way to ~24,200 and breaks somewhere between there and
+~40,000. So the category now separates two models that were indistinguishable
+at every length measured before stage 9 — which is what a benchmark is for.
+It is a slope for one model and a later cliff for the other, not a single
+threshold.
 
 Every loss in that table comes from **one task**, `longctx.event_ordering`,
 which asks for four scattered events in chronological order. At ~40,000 tokens
@@ -146,15 +157,20 @@ a cliff because a 64k window no longer fits:
 |---|---|---|---|---|---|---|
 | `gpt-oss:20b` | 8a | 8,498 | 116.6 | 9,109 | 0.38 | 100% GPU |
 | `gpt-oss:20b` | 9a | 16,202 | 111.4 | 8,882 | 0.96 | 100% GPU |
+| `gpt-oss:20b` | 9c | 24,200 | 107.0 | 8,404 | 1.48 | 100% GPU |
 | `gpt-oss:20b` | 9b | 40,170 | 99.0 | 6,935 | 2.88 | 100% GPU |
 | `qwen3-coder:30b` | 8a | 9,506 | 137.5 | 7,215 | 0.48 | 100% GPU |
 | `qwen3-coder:30b` | 9a | 18,190 | 111.9 | 5,089 | 1.84 | 100% GPU |
+| `qwen3-coder:30b` | 9c | 27,206 | 73.3 | 2,427 | 5.33 | 91% GPU |
 | `qwen3-coder:30b` | 9b | 45,200 | 35.8 | 879 | 23.99 | **71% GPU** |
 
-`qwen3-coder:30b` at `num_ctx` 65536 peaks at 31,195 MiB of 32,760 and the
-engine offloads 29% of it to CPU: output throughput drops to a quarter and
-prompt processing to an eighth, with a 24-second time to first token. On this
-host, 40,000-token documents are a `gpt-oss:20b` job.
+`qwen3-coder:30b` runs out of VRAM before it runs out of accuracy. It peaks at
+31,257 MiB of 32,760 at a 40,960 window (9% offloaded, 73.3 tok/s) and 31,195
+MiB at 65,536 (29% offloaded, 35.8 tok/s, 24-second TTFT). Stage 5 measured
+quality unchanged under 29% offload, so the scores above are comparable; the
+throughput is not. On this host, documents past ~24,000 tokens are a
+`gpt-oss:20b` job on speed grounds alone, and past ~40,000 on quality grounds
+too.
 
 ### glm-4.7-flash needs three times the output budget, not a better memory
 

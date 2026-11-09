@@ -134,7 +134,25 @@ def effective_filler_tokens(settings: RunSettings, task: Task) -> int | None:
 PROMPT_TOKENS_PER_FILLER_TOKEN = 1.3
 
 
-def filler_fit_problems(settings: RunSettings, tasks: list[Task]) -> list[str]:
+def prompt_token_ratios(settings: RunSettings, store: Any | None) -> dict[str, float]:
+    """Measured prompt-tokens-per-filler-token for each selected model.
+
+    Models with no measured history are left out, and the fit check falls back
+    to ``PROMPT_TOKENS_PER_FILLER_TOKEN`` for them.
+    """
+    if store is None:
+        return {}
+    ratios: dict[str, float] = {}
+    for model in settings.models:
+        measured = store.measured_prompt_token_ratio(model)
+        if measured is not None:
+            ratios[model] = measured[0]
+    return ratios
+
+
+def filler_fit_problems(
+    settings: RunSettings, tasks: list[Task], ratios: dict[str, float] | None = None
+) -> list[str]:
     """Tasks whose document plus output budget cannot fit their context window.
 
     Ollama's ``num_ctx`` covers the prompt and the generation together, and it
@@ -151,13 +169,25 @@ def filler_fit_problems(settings: RunSettings, tasks: list[Task]) -> list[str]:
         options = build_options(settings, task)
         num_ctx = int(options["num_ctx"])
         predict = int(options["num_predict"])
-        estimated = int(filler * PROMPT_TOKENS_PER_FILLER_TOKEN) + predict
-        if estimated > num_ctx:
+        for model in settings.models or [""]:
+            measured = (ratios or {}).get(model)
+            # A measured ratio gets 5% of slack: it is an average over a
+            # handful of attempts on one document size, not a guarantee, and
+            # tokenization of a different document can run slightly longer.
+            ratio = measured * 1.05 if measured else PROMPT_TOKENS_PER_FILLER_TOKEN
+            prompt = int(filler * ratio)
+            if prompt + predict <= num_ctx:
+                continue
+            basis = (
+                f"measured {measured:.3f} prompt tokens per filler token for {model}, +5%"
+                if measured
+                else f"assuming {PROMPT_TOKENS_PER_FILLER_TOKEN} prompt tokens per filler "
+                "token, which has no measured history for this model"
+            )
             problems.append(
-                f"{task.id}: {filler} filler tokens render to roughly "
-                f"{int(filler * PROMPT_TOKENS_PER_FILLER_TOKEN)} prompt tokens (ESTIMATE) "
-                f"plus {predict} output tokens, over num_ctx {num_ctx}; "
-                "raise --context or lower --filler"
+                f"{task.id}{f' / {model}' if model else ''}: {filler} filler tokens render to "
+                f"roughly {prompt} prompt tokens (ESTIMATE; {basis}) plus {predict} output "
+                f"tokens, over num_ctx {num_ctx}; raise --context or lower --filler"
             )
     return problems
 
@@ -249,7 +279,7 @@ class BenchmarkRunner:
         if not tasks:
             raise ValueError("no tasks selected")
 
-        fit = filler_fit_problems(settings, tasks)
+        fit = filler_fit_problems(settings, tasks, prompt_token_ratios(settings, self.store))
         if fit:
             detail = "; ".join(fit)
             if not settings.force:
