@@ -491,3 +491,102 @@ def test_attempt_detail_rebuilds_an_overridden_document_at_the_size_actually_use
     assert task["filler_tokens_rendered"] == 2000
     assert task["filler_tokens"] == suite.get("longctx.count_markers").filler_tokens
     assert task["filler_tokens_rendered"] != task["filler_tokens"]
+
+
+# ------------------------------------------------- grouped rubric grading
+
+
+def test_grading_queue_groups_repetitions_of_one_model_and_task(store, run_id):
+    """96 attempts were 22 decisions, and that is why they went ungraded.
+
+    Repetitions of one prompt at temperature 0 are usually the same text.
+    Judging each separately multiplies the work by the repetition count for no
+    extra information, so the queue reports groups alongside attempts.
+    """
+    payload = webapi.grading_queue(store, run_id)
+    assert payload["total"] == 2, "two rubric attempts: one task x two repetitions"
+    assert payload["decisions"] == 1, "but only one judgement to make"
+    (group,) = payload["groups"]
+    assert group["task_id"] == "coding.refactor_decision"
+    assert group["model"] == "m:1b"
+    assert group["repetitions"] == 2
+    assert group["identical"] is True, "the mock returns one canned answer"
+    assert group["distinct_responses"] == 1
+    assert sorted(group["attempt_ids"]) == sorted(a["attempt_id"] for a in payload["queue"])
+
+
+def test_one_judgement_grades_every_attempt_in_the_group(store, run_id):
+    """Grouping must not merge scores: each attempt keeps its own row."""
+    group = webapi.grading_queue(store, run_id)["groups"][0]
+    criteria = [{"text": c, "met": True} for c in group["criteria"]]
+    result = webapi.set_grade(
+        store, {"attempt_ids": group["attempt_ids"], "criteria": criteria, "grader": "a-human"}
+    )
+    assert result["graded"] == len(group["attempt_ids"])
+    assert result["divergent"] is False
+
+    after = webapi.grading_queue(store, run_id)
+    assert after["scored"] == after["total"], "every attempt in the group is scored"
+    assert after["decisions_remaining"] == 0
+    stored = store.manual_scores(run_id)
+    assert len(stored) == len(group["attempt_ids"])
+    assert {s["score"] for s in stored.values()} == {float(len(criteria))}
+
+
+def test_a_group_grade_records_that_it_was_a_group(store, run_id):
+    """Provenance: a reader of the score must know it was not read one by one."""
+    group = webapi.grading_queue(store, run_id)["groups"][0]
+    webapi.set_grade(store, {"attempt_ids": group["attempt_ids"], "score": 1, "max_score": 1})
+    notes = {s["notes"] for s in store.manual_scores(run_id).values()}
+    assert any("graded as a group of 2 repetitions with identical responses" in n for n in notes)
+
+
+def test_a_group_grade_is_refused_when_the_responses_differ(store, run_id):
+    """One grader's reading must not be applied to text they did not read.
+
+    Repeated attempts at temperature 0 were observed on this engine to produce
+    different output lengths for the same prompt, so divergence is a real
+    case, not a hypothetical.
+    """
+    group = webapi.grading_queue(store, run_id)["groups"][0]
+    ids = group["attempt_ids"]
+    with store.raw() as conn:
+        conn.execute(
+            "UPDATE attempts SET response_text = ? WHERE id = ?",
+            ("a materially different answer", ids[1]),
+        )
+        conn.commit()
+
+    refreshed = webapi.grading_queue(store, run_id)["groups"][0]
+    assert refreshed["identical"] is False
+    assert refreshed["distinct_responses"] == 2
+
+    with pytest.raises(webapi.ApiError, match="different responses"):
+        webapi.set_grade(store, {"attempt_ids": ids, "score": 1, "max_score": 1})
+    assert store.manual_scores(run_id) == {}, "nothing stored on a refusal"
+
+    result = webapi.set_grade(
+        store, {"attempt_ids": ids, "score": 1, "max_score": 1, "allow_divergent": True}
+    )
+    assert result["divergent"] is True
+    notes = {s["notes"] for s in store.manual_scores(run_id).values()}
+    assert any("allow_divergent" in n for n in notes)
+
+
+def test_a_group_grade_refuses_to_span_two_models_or_tasks(store, run_id):
+    """A judgement covers one model's repetitions of one task, nothing wider."""
+    queue = webapi.grading_queue(store, run_id)
+    ids = queue["groups"][0]["attempt_ids"]
+    other = next(
+        a["id"]
+        for a in store.attempts(run_id)
+        if a["graded"] == "automatic" and a["task_id"] != "coding.refactor_decision"
+    )
+    with pytest.raises(webapi.ApiError, match="same task and model"):
+        webapi.set_grade(store, {"attempt_ids": [ids[0], other], "score": 1, "max_score": 1})
+
+
+def test_a_group_grade_rejects_an_empty_or_malformed_list(store, run_id):
+    for bad in ([], "7", [None]):
+        with pytest.raises(webapi.ApiError):
+            webapi.set_grade(store, {"attempt_ids": bad, "score": 1, "max_score": 1})

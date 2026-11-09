@@ -107,6 +107,13 @@ score by design; the queue shows each response beside its criteria with a
 checkbox per criterion, and the score is stored in its own table where an
 automatic re-grade cannot touch it.
 
+The queue groups a model's repetitions of one task into a single judgement,
+because repetitions at temperature 0 are usually the same text and grading
+each separately is what leaves a queue unfinished. Where the responses do
+differ — which this engine does produce — the group says so and a single grade
+is refused unless you record that you read all of them and judge them
+equivalent. Every attempt still gets its own stored score.
+
 The viewer cannot start, stop or configure a benchmark. Runs are launched from
 the CLI, where preflight and serial execution are enforced; a browser button
 would invite two people starting runs on one GPU. Recording a manual grade is

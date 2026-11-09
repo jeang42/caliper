@@ -13,6 +13,7 @@ prevent.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Any
@@ -266,50 +267,115 @@ def _task_definition(
     }
 
 
+def _response_digest(text: str | None) -> str:
+    """Stable fingerprint of a response, for deciding whether two match.
+
+    Whitespace is normalised because trailing newlines differ between
+    otherwise identical generations and are not something a grader would
+    judge differently.
+    """
+    return hashlib.sha256(" ".join((text or "").split()).encode()).hexdigest()[:16]
+
+
 def grading_queue(store: Store, run_id: str) -> dict[str, Any]:
     """Attempts at manually graded tasks, with their criteria and any score.
 
     This is the view that makes the long tail of evaluation sustainable: every
     rubric attempt in one place, with the criteria beside the response.
+
+    Attempts are also grouped by (task, model), because repetitions of one
+    prompt at temperature 0 are usually the same text and judging each one
+    separately is what makes a queue of 96 attempts go ungraded. A group whose
+    responses are byte-identical after whitespace normalisation can be graded
+    once; a group whose responses differ says so and must be graded per
+    attempt. Grouping never merges scores - every attempt still gets its own
+    row in ``manual_scores``.
     """
     run = store.get_run(run_id)
     if run is None:
         raise ApiError(f"no such run: {run_id}", status=404)
     manual = store.manual_scores(run_id)
     queue = []
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
     for row in store.attempts(run_id):
-        if row["graded"] not in {"manual_rubric", "no_output"}:
+        if row["graded"] not in GRADEABLE_STATES:
             continue
         task = _task_definition(run["suite"], row["task_id"])
         score = manual.get(row["id"])
-        queue.append(
+        digest = _response_digest(row["response_text"])
+        entry = {
+            "attempt_id": row["id"],
+            "model": row["model"],
+            "task_id": row["task_id"],
+            "category": row["category"],
+            "repetition": row["repetition"],
+            "graded": row["graded"],
+            "truncated": bool(row["truncated"]),
+            "criteria": (task or {}).get("criteria", []),
+            "title": (task or {}).get("title"),
+            "scored": score is not None,
+            "score": score["score"] if score else None,
+            "max_score": score["max_score"] if score else None,
+            "response_digest": digest,
+            "response_chars": len(row["response_text"] or ""),
+        }
+        queue.append(entry)
+        key = (row["task_id"], row["model"])
+        group = groups.setdefault(
+            key,
             {
-                "attempt_id": row["id"],
-                "model": row["model"],
                 "task_id": row["task_id"],
+                "model": row["model"],
                 "category": row["category"],
-                "repetition": row["repetition"],
-                "graded": row["graded"],
-                "truncated": bool(row["truncated"]),
-                "criteria": (task or {}).get("criteria", []),
-                "title": (task or {}).get("title"),
-                "scored": score is not None,
-                "score": score["score"] if score else None,
-                "max_score": score["max_score"] if score else None,
-            }
+                "title": entry["title"],
+                "criteria": entry["criteria"],
+                "attempts": [],
+                "digests": [],
+            },
         )
+        group["attempts"].append(entry)
+        group["digests"].append(digest)
+
+    grouped = []
+    for group in groups.values():
+        digests = group.pop("digests")
+        attempts = group["attempts"]
+        group["identical"] = len(set(digests)) == 1
+        group["distinct_responses"] = len(set(digests))
+        group["repetitions"] = len(attempts)
+        group["scored"] = sum(1 for a in attempts if a["scored"])
+        group["attempt_ids"] = [a["attempt_id"] for a in attempts]
+        group["truncated"] = any(a["truncated"] for a in attempts)
+        grouped.append(group)
+    grouped.sort(key=lambda g: (g["category"], g["task_id"], g["model"]))
+
     done = sum(1 for q in queue if q["scored"])
     return {
         "run_id": run_id,
         "queue": queue,
+        "groups": grouped,
         "total": len(queue),
         "scored": done,
         "remaining": len(queue) - done,
+        "decisions": len(grouped),
+        "decisions_remaining": sum(1 for g in grouped if g["scored"] < g["repetitions"]),
     }
 
 
 def set_grade(store: Store, payload: dict[str, Any]) -> dict[str, Any]:
-    """Record a human score. The only write this API performs."""
+    """Record a human score. The only write this API performs.
+
+    ``attempt_ids`` grades several attempts with one judgement, which is how a
+    group of repetitions is graded once. The responses must be identical after
+    whitespace normalisation, or the call is refused: applying one grader's
+    reading to text they did not read is exactly the shortcut this queue exists
+    to avoid. ``allow_divergent`` overrides that for a grader who has read all
+    of them and judges them equivalent, and the reason is recorded in the
+    stored note.
+    """
+    ids = payload.get("attempt_ids")
+    if ids is not None:
+        return _set_grades(store, payload, ids)
     try:
         attempt_id = int(payload["attempt_id"])
     except (KeyError, TypeError, ValueError) as exc:
@@ -366,6 +432,68 @@ def set_grade(store: Store, payload: dict[str, Any]) -> dict[str, Any]:
         "score": score,
         "max_score": max_score,
         "fraction": score / max_score,
+        "stored": True,
+    }
+
+
+def _set_grades(store: Store, payload: dict[str, Any], ids: Any) -> dict[str, Any]:
+    """Apply one judgement to a group of attempts, all or nothing."""
+    if not isinstance(ids, list) or not ids:
+        raise ApiError("attempt_ids must be a non-empty list of attempt ids")
+    try:
+        attempt_ids = [int(i) for i in ids]
+    except (TypeError, ValueError) as exc:
+        raise ApiError("attempt_ids must all be integers") from exc
+
+    rows = []
+    for attempt_id in attempt_ids:
+        row = store.attempt(attempt_id)
+        if row is None:
+            raise ApiError(f"no such attempt: {attempt_id}", status=404)
+        rows.append(row)
+
+    tasks = {r["task_id"] for r in rows}
+    models = {r["model"] for r in rows}
+    if len(tasks) > 1 or len(models) > 1:
+        raise ApiError(
+            "attempt_ids must all be the same task and model: got "
+            f"{sorted(tasks)} and {sorted(models)}. One judgement covers one "
+            "model's repetitions of one task, nothing wider."
+        )
+
+    digests = {_response_digest(r["response_text"]) for r in rows}
+    divergent = len(digests) > 1
+    if divergent and not payload.get("allow_divergent"):
+        raise ApiError(
+            f"these {len(rows)} attempts produced {len(digests)} different responses, so one "
+            "judgement cannot cover them. Grade them individually, or pass allow_divergent "
+            "to record that you read all of them and judge them equivalent."
+        )
+
+    note = payload.get("notes") or ""
+    if len(rows) > 1:
+        how = (
+            "with differing responses (allow_divergent)"
+            if divergent
+            else "with identical responses"
+        )
+        provenance = f"graded as a group of {len(rows)} repetitions {how}"
+        note = f"{note}\n{provenance}".strip() if note else provenance
+
+    results = []
+    for attempt_id in attempt_ids:
+        single = {k: v for k, v in payload.items() if k not in {"attempt_ids", "notes"}}
+        single["attempt_id"] = attempt_id
+        single["notes"] = note
+        results.append(set_grade(store, single))
+    return {
+        "attempt_ids": attempt_ids,
+        "graded": len(results),
+        "divergent": divergent,
+        "distinct_responses": len(digests),
+        "score": results[0]["score"],
+        "max_score": results[0]["max_score"],
+        "results": results,
         "stored": True,
     }
 

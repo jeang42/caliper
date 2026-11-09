@@ -22,7 +22,29 @@ caliper serve
 ```
 
 Open the viewer, pick a run, and press **Grade rubric tasks** — or go straight
-to the Grading tab. The queue lists every rubric attempt with a progress bar.
+to the Grading tab.
+
+**The queue groups repetitions.** One row per (task, model), not per attempt,
+because a run with three repetitions produces three attempts at one prompt at
+temperature 0 and they are usually the same text. Judging each separately
+multiplies the work by the repetition count for no extra information, and a
+queue that takes three times as long as it needs to is a queue that stays
+unfinished. On this host's stored runs that is 105 attempts reduced to 35
+judgements.
+
+Each group says whether the responses are identical:
+
+- **identical** — every repetition produced the same text after whitespace
+  normalisation. One judgement covers the group, and each attempt still gets
+  its own row in `manual_scores`; nothing is merged.
+- **n different** — the repetitions diverged, which this engine does produce
+  at temperature 0. The server **refuses** a group grade here. Read each
+  response; then either tick *I read all responses and judge them equivalent*
+  to record one judgement across them, or use **grade only this** on a single
+  response to score it alone. Either way the stored note says which happened,
+  so a later reader knows the score was not read one attempt at a time.
+
+The progress bar counts judgements, with the attempt count beside it.
 Clicking one shows the prompt, the response, the thinking text and the tool
 calls beside the task's criteria, with a checkbox per criterion. The score is
 points met over points available.

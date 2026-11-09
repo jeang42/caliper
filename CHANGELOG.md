@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.7.0 — 2026-11-09
+
+The rubric grading queue groups repetitions, which is what makes it
+finishable. Four of six categories have been measured by automatic tasks only
+because 105 ungraded rubric attempts were too many to work through.
+
+- `GET /api/runs/<id>/grading` now returns `groups` (one per task and model)
+  alongside `queue`, with `decisions` and `decisions_remaining`. On this
+  host's stored runs that is **105 attempts reduced to 35 judgements**.
+- `POST /api/grades` accepts `attempt_ids` to record one judgement against a
+  group. Each attempt still gets its own `manual_scores` row; nothing is
+  merged, and the stored note records that it was graded as a group.
+- **A group grade is refused when the responses differ.** Repeated attempts at
+  temperature 0 were observed on this engine to produce different output, so
+  divergence is real: 19 of the 35 groups here are divergent. Applying one
+  reading to text the grader did not read is the shortcut this queue exists to
+  avoid. `allow_divergent` overrides it for a grader who has read all of them
+  and judges them equivalent, and that fact is recorded in the note.
+- The viewer's queue shows one row per judgement, marks each group identical
+  or *n different*, stacks every response in the group above one set of
+  criteria, and keeps **grade only this** per response for a group that
+  deserves different scores per repetition.
+- A correction: an earlier estimate of "22 decisions" collapsed task/model
+  pairs across runs. Grading is per-run, so the real figure is 35.
+- 275 tests.
+
 ## 0.6.0 — 2026-11-09
 
 Stage 9c places the knee, and the fit guard stops refusing runs that fit.

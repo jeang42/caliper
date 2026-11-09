@@ -233,3 +233,38 @@ def test_server_has_no_endpoint_that_starts_a_run(store):
         source = Path(module.__file__).read_text()
         assert "BenchmarkRunner" not in source, module.__name__
         assert "from .runner import" not in source, module.__name__
+
+
+def test_grouped_grading_works_over_http_end_to_end(live):
+    """The group payload and the group write must agree across the real socket.
+
+    The queue and the grade are separate code paths joined only by the field
+    names in the JSON; a rename on one side would pass every unit test and
+    break the page.
+    """
+    base, run_id = live
+    status, body, _ = get(f"{base}/api/runs/{run_id}/grading")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["decisions"] >= 1
+    group = payload["groups"][0]
+    assert group["attempt_ids"] and group["identical"] is True
+
+    request = urllib.request.Request(
+        f"{base}/api/grades",
+        data=json.dumps(
+            {
+                "attempt_ids": group["attempt_ids"],
+                "criteria": [{"text": c, "met": True} for c in group["criteria"]],
+            }
+        ).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as resp:
+        result = json.loads(resp.read())
+    assert result["graded"] == len(group["attempt_ids"])
+    assert result["stored"] is True
+
+    _, body, _ = get(f"{base}/api/runs/{run_id}/grading")
+    assert json.loads(body)["decisions_remaining"] == 0

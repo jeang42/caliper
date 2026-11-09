@@ -86,6 +86,22 @@ while the generator, the seed and the size are unchanged; a test asserts it
 matches what the runner sent, including under an override. `task.prompt`
 remains the unrendered template.
 
+### Grouped rubric grading
+
+`GET /api/runs/<id>/grading` returns `queue` (one entry per attempt, as
+before) and `groups` (one entry per task and model), plus `decisions` and
+`decisions_remaining` beside `total` and `scored`. Each group carries
+`attempt_ids`, `repetitions`, `identical`, `distinct_responses` and the task's
+`criteria`.
+
+`POST /api/grades` accepts `attempt_ids` in place of `attempt_id` to record one
+judgement against several attempts. They must be the same task and model, and
+their responses must be identical after whitespace normalisation, or the call
+is refused with 400 — one grader's reading must not be applied to text they did
+not read. `allow_divergent: true` overrides that for a grader who has read all
+of them and judges them equivalent. Either way each attempt gets its own
+`manual_scores` row and the stored note records that it was graded as a group.
+
 ## Python API
 
 For in-process consumers (Nexus, Trykode, an agent with repository access).

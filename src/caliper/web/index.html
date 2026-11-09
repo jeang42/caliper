@@ -460,30 +460,131 @@ async function openGrading(runId) {
   }
   state.runId = runId;
   const d = await api(`/api/runs/${encodeURIComponent(runId)}/grading`);
-  const doneFrac = d.total ? d.scored / d.total : 0;
+  const doneFrac = d.decisions ? (d.decisions - d.decisions_remaining) / d.decisions : 0;
   main.innerHTML = `
     <section><h2>Rubric grading queue · <code>${esc(runId)}</code></h2>
       <div class="row"><div style="flex:1">
         <div class="bar"><i style="width:${(doneFrac * 100).toFixed(1)}%"></i></div>
-      </div><span class="dim">${d.scored} / ${d.total} graded</span></div>
-      <p class="dim">These tasks have no automatic score by design. Click one to read the
-      response beside its criteria and record a score.</p>
+      </div><span class="dim">${d.decisions - d.decisions_remaining} / ${d.decisions}
+        decisions · ${d.scored} / ${d.total} attempts</span></div>
+      <p class="dim">These tasks have no automatic score by design. Repetitions of one
+      prompt are grouped: where a model produced the same text every time, one judgement
+      covers the group. Where it did not, the group says so and each attempt is graded
+      on its own.</p>
       <div class="scroll"><table>
-        <thead><tr><th>Task</th><th>Model</th><th>Rep</th><th>State</th><th>Score</th></tr></thead>
-        <tbody>${d.queue.map((q) => `
-          <tr class="clickable" data-attempt="${q.attempt_id}">
-            <td><code>${esc(q.task_id)}</code><div class="dim">${esc(q.title || "")}</div></td>
-            <td><code>${esc(q.model)}</code></td><td>${q.repetition}</td>
-            <td>${q.truncated ? '<span class="warn">no output (truncated)</span>'
-                 : q.graded === "no_output" ? '<span class="warn">no output</span>'
+        <thead><tr><th>Task</th><th>Model</th><th>Repetitions</th><th>State</th><th>Score</th></tr></thead>
+        <tbody>${d.groups.map((g) => `
+          <tr class="clickable" data-group="${esc(g.task_id)}|${esc(g.model)}">
+            <td><code>${esc(g.task_id)}</code><div class="dim">${esc(g.title || "")}</div></td>
+            <td><code>${esc(g.model)}</code></td>
+            <td>${g.repetitions}${g.identical
+                 ? '<span class="dim"> · identical</span>'
+                 : `<span class="warn"> · ${g.distinct_responses} different</span>`}</td>
+            <td>${g.truncated ? '<span class="warn">no output (truncated)</span>'
+                 : g.scored === g.repetitions ? '<span class="good">graded</span>'
+                 : g.scored ? '<span class="warn">partly graded</span>'
                  : '<span class="pill">awaiting grade</span>'}</td>
-            <td>${q.scored ? `<span class="good">${q.score}/${q.max_score}</span>`
+            <td>${g.scored ? `<span class="good">${g.attempts.find((a) => a.scored).score}/${
+                   g.attempts.find((a) => a.scored).max_score}</span>`
                  : '<span class="dim">—</span>'}</td>
           </tr>`).join("")}</tbody></table></div>
     </section>`;
-  main.querySelectorAll("tr[data-attempt]").forEach((tr) => {
-    tr.onclick = () => openAttempt(Number(tr.dataset.attempt));
+  main.querySelectorAll("tr[data-group]").forEach((tr) => {
+    const [taskId, model] = tr.dataset.group.split("|");
+    tr.onclick = () => openGroup(d, taskId, model);
   });
+}
+
+// Grade one model's repetitions of one task together. The responses are all
+// shown: a judgement applied to text the grader did not read is the failure
+// this whole screen is built to prevent, so the server refuses a group grade
+// when the responses differ unless the grader explicitly overrides it.
+async function openGroup(queue, taskId, model) {
+  const group = queue.groups.find((g) => g.task_id === taskId && g.model === model);
+  if (!group) return;
+  const details = await Promise.all(
+    group.attempt_ids.map((id) => api(`/api/attempts/${id}`)),
+  );
+  const first = details[0];
+  const criteria = group.criteria || [];
+  // Restore the ticks from whichever attempt in the group was graded, so
+  // reopening a group shows the judgement rather than a blank form.
+  const graded = details.find((d) => d.manual_score && d.manual_score.criteria_json);
+  let prior = null;
+  try {
+    prior = graded ? JSON.parse(graded.manual_score.criteria_json) : null;
+  } catch (e) {
+    prior = null;
+  }
+  const divergent = !group.identical;
+
+  main.innerHTML = `
+    <section>
+      <div class="row"><button id="back">&larr; queue</button>
+        <h2 style="margin:0"><code>${esc(taskId)}</code> · <code>${esc(model)}</code></h2></div>
+      <p class="dim">${esc(first.task ? first.task.title || "" : "")}</p>
+      ${divergent
+        ? `<div class="note bad">These ${group.repetitions} repetitions produced
+           ${group.distinct_responses} different responses. Read each one. A single
+           judgement is only honest here if you consider them equivalent — tick the box
+           below to record that you did.</div>`
+        : `<div class="note">All ${group.repetitions} repetitions produced the same text,
+           so one judgement covers them. Each attempt still gets its own stored score.</div>`}
+      ${details.map((d, i) => `
+        <h2>Response ${i + 1} of ${details.length}
+          <span class="dim">· rep ${d.attempt.repetition} · ${
+            (d.attempt.response_text || "").length} chars${
+            d.attempt.truncated ? " · truncated" : ""}</span>
+          <button class="single" data-attempt="${d.attempt.id}"
+            title="Open this attempt alone and score it on its own">grade only this</button></h2>
+        <pre class="scroll">${d.attempt.response_text
+          ? esc(d.attempt.response_text) : '<span class="dim">(empty)</span>'}</pre>`).join("")}
+      <h2>Manual grading</h2>
+      <p class="dim">One point per criterion met. No LLM judge is used; this score is yours.</p>
+      <div id="crits">${criteria.map((c, i) => `
+        <label class="crit"><input type="checkbox" data-i="${i}"
+          ${prior && prior[i] && prior[i].met ? "checked" : ""}>
+          <span>${esc(c)}</span></label>`).join("")}</div>
+      ${divergent ? `<label class="crit"><input type="checkbox" id="divergent">
+        <span>I read all ${group.repetitions} responses and judge them equivalent</span>
+        </label>` : ""}
+      <div class="row" style="margin-top:10px">
+        <input id="notes" placeholder="notes (optional)" style="flex:1">
+        <button id="save">Save for all ${group.repetitions} repetition(s)</button>
+      </div>
+      <p class="dim" id="msg"></p>
+    </section>`;
+
+  main.querySelector("#back").onclick = () => openGrading(queue.run_id);
+  // A divergent group may deserve different scores per repetition. The group
+  // form is the fast path, not the only one.
+  main.querySelectorAll("button.single").forEach((b) => {
+    b.onclick = (ev) => { ev.stopPropagation(); openAttempt(Number(b.dataset.attempt)); };
+  });
+  main.querySelector("#save").onclick = async () => {
+    const boxes = [...main.querySelectorAll("#crits input")];
+    const payload = {
+      attempt_ids: group.attempt_ids,
+      criteria: boxes.map((cb, i) => ({ text: criteria[i], met: cb.checked })),
+      notes: main.querySelector("#notes").value,
+    };
+    const override = main.querySelector("#divergent");
+    if (override && override.checked) payload.allow_divergent = true;
+    const msg = main.querySelector("#msg");
+    try {
+      const res = await api("/api/grades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      msg.textContent = `Saved ${res.score}/${res.max_score} to ${res.graded} attempt(s).`;
+      msg.className = "good";
+      setTimeout(() => openGrading(queue.run_id), 600);
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = "bad";
+    }
+  };
 }
 
 // ---------------------------------------------------------------- compare
