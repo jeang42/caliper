@@ -197,8 +197,9 @@ price and returns nothing.
 
 This diagnostic was run with `--force`, because the fit guard's generic
 estimate of 1.3 prompt tokens per filler token is too pessimistic for glm's
-tokenizer (measured: 1.051), and `num_ctx` was held at 9a's 32768 so the two
-runs stay comparable.
+tokenizer (1.051 as measured in stage 9a; 1.057 is the maximum observed
+across every run since), and `num_ctx` was held at 9a's 32768 so the two runs
+stay comparable.
 
 ### A validator correction
 

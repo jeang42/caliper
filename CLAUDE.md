@@ -123,7 +123,9 @@ Break these and the output stops being evidence.
   was noticed; length was in fact never varied until 0.4.0.
 - **One prompt-token estimate cannot serve every tokenizer.** The fit check's
   1.3-per-filler-token constant refused a `glm-4.7-flash` diagnostic that
-  fitted with 3,500 tokens to spare, because glm's measured ratio is 1.051.
+  fitted with 3,500 tokens to spare, because glm's ratio measured 1.051 on
+  the run in question (1.057 is the maximum observed since; the guard takes
+  the maximum, not the mean).
   `Store.measured_prompt_token_ratio` supplies a per-model figure from runs
   launched with `--filler`; the constant is the fallback, and the refusal
   message names which was used. Do not tighten the constant to make a

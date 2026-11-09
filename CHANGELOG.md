@@ -84,7 +84,7 @@ glm budget diagnostic. Full figures in [docs/RESULTS.md](docs/RESULTS.md).
   of reasoning. It needs roughly 3x the budget other models finish inside.
 - The fit guard refused that diagnostic, correctly and too conservatively: its
   generic 1.3 prompt tokens per filler token is wrong for glm's tokenizer
-  (measured 1.051). Run with `--force` and `num_ctx` held at 9a's value so the
+  (1.051 as measured in stage 9a). Run with `--force` and `num_ctx` held at 9a's value so the
   two runs stay comparable; the override is recorded in the run.
 - Published as a public repository: MIT licence, NOTICE, CI on 3.11-3.13,
   attribution, and a release scan. The packaged version had drifted (metadata

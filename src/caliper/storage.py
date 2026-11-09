@@ -458,8 +458,9 @@ class Store:
         The fit check needs to know how large a document will actually be
         before it is sent. A single constant has to assume the most verbose
         tokenizer, which refuses runs that would have fitted: the measured
-        ratios here span 1.013 for ``gpt-oss:20b`` to 1.14 for the qwen3
-        tokenizers, so a 1.3 constant is 28% pessimistic for the former.
+        ratios here span 1.019 for ``gpt-oss:20b`` to 1.178 for the qwen3.5
+        and qwen3.8 tokenizers, so a 1.3 constant is 28% pessimistic for the
+        former.
 
         Only runs launched with ``--filler`` are counted, because there the
         document size is one known number for every task. Without an override

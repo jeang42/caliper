@@ -167,12 +167,16 @@ moving on.
      a 64k window: peak GPU memory at `num_ctx` 65536 measured 19,447 MiB and
      31,195 MiB of 32,760 total, so 9b is close to the card's limit and
      `qwen3-coder:30b` may partially offload, which the report records.
+   - **9c**: the same two models at `--filler 24000 --context 40960`, added
+     after 9a and 9b to place the knee between them.
 
-   Scripted as `./scripts/benchmark-stage.sh 9a`. Neither has run, and no
-   result at any document size other than ~8,000 tokens exists yet. If models
-   hold at 1.00 through 9b, the honest conclusion is that this hardware cannot
-   hold a document large enough to challenge them, and the category should be
-   reported as a pass/fail gate rather than a discriminator.
+   **All three have run.** Document length is what degrades these models: both
+   models at ~40,000 tokens fall to 0.88, `qwen3-coder:30b` slides from
+   ~18,000 and fails consistently from ~27,000, and every loss is the one task
+   that must aggregate across the whole document. See [RESULTS.md](RESULTS.md).
+   The concern that this hardware might not hold a document large enough to
+   challenge these models turned out not to apply: ~24,000 tokens is enough to
+   separate two of them.
 
 ## Proposed download plan
 

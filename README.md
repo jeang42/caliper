@@ -191,11 +191,14 @@ Two suites are installed:
 
 | Suite | Tasks | What it is |
 |---|---|---|
-| `v1` | 25 | The measured baseline. Every stored result to date uses it. |
+| `v1` | 25 | The baseline. Every category except long context is measured with it. |
 | `v2` | 30 | `v1` with its three long-context tasks replaced by eight harder ones. |
 
-`v1` remains the default, because `v2` has not been measured yet. Select a
-suite with `--suite v2` on `run`, `plan` and `tasks`.
+`v1` remains the default because it is the baseline every stored
+cross-category result uses; `v2` differs only in `long_context` and inherits
+the rest unchanged. Both are measured — see
+[docs/RESULTS.md](docs/RESULTS.md). Select a suite with `--suite v2` on `run`,
+`plan` and `tasks`.
 
 A suite may extend another through a `suite.toml` manifest, naming the
 categories it replaces and inheriting the rest instead of copying them. The

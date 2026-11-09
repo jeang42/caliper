@@ -98,6 +98,14 @@ routes happen to exist.
 Live progress needs no machinery: attempts are committed as they complete (for
 interruption safety), so polling the database shows an executing run advancing.
 
+The rubric queue groups attempts by (task, model) rather than listing them one
+by one, because repetitions of one prompt at temperature 0 are usually the same
+text. The grouping lives in `webapi.grading_queue`, not in the page, so the
+rule that decides whether a group may be graded once — identical responses
+after whitespace normalisation — is enforced on the write path as well as
+displayed on the read path. A browser cannot grade a divergent group by
+omitting a field.
+
 ## Internal API for other projects
 
 Nexus, Trykode or anything else should consume Caliper through these stable
