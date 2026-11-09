@@ -75,9 +75,16 @@ it would dominate the database - so `/api/attempts/<id>` rebuilds it from the
 run's stored seed and returns it as `task.rendered_prompt`. It is `null` for a
 task without filler.
 
+The rebuild uses the run's own document size, which is the run config's
+`filler_tokens_override` when the run was launched with `--filler` and the
+task's `filler_tokens` otherwise. `task.filler_tokens_rendered` reports the
+size actually used and `task.filler_tokens` the task's own value, so the two
+can be compared.
+
 Because it is a reconstruction rather than a recording, it is faithful only
-while the generator and the seed are unchanged; a test asserts it matches what
-the runner sent. `task.prompt` remains the unrendered template.
+while the generator, the seed and the size are unchanged; a test asserts it
+matches what the runner sent, including under an override. `task.prompt`
+remains the unrendered template.
 
 ## Python API
 

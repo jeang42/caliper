@@ -193,6 +193,13 @@ placeholder. `{{FILLER}}` (v1) puts the *same* block at every site;
 numbering continuing across them, and `filler_tokens` then means the
 approximate total across all segments rather than the size of each.
 
+`--filler N` on `run` and `plan` overrides each task's `filler_tokens`, which
+is the only way to vary document size: `--context` sets `num_ctx`, the window,
+not the document. Raise both together — `num_ctx` holds the prompt and the
+generation, and Ollama discards the overflow silently, so a run whose document
+cannot fit is refused rather than scored against a document the model never
+saw. `caliper plan` reports the same thing before any GPU time is spent.
+
 Validators: `exact`, `contains_all`, `regex_all`, `choice`, `numeric`,
 `json_schema`, `tool_call`, `python_cases`, `rubric`.
 

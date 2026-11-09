@@ -38,11 +38,21 @@ declare -A STAGES=(
   # offloading; 8b re-measures the same tasks at 32k for the scaling curve.
   [8a]="v2 long context: all five measured models, harder tasks|--suite v2 --category long_context --model gpt-oss:20b --model qwen3-coder:30b --model qwen3.5:35b --model glm-4.7-flash:latest --model qwen3.8:27b --repetitions 3 --warmup 1 --timeout 1200"
   [8b]="v2 long context at 32k|--suite v2 --category long_context --model gpt-oss:20b --model qwen3-coder:30b --repetitions 2 --warmup 1 --context 32768 --timeout 1200"
+  # Stage 9 varies the one axis no run has ever moved: the size of the
+  # document itself. --context only moves num_ctx; --filler moves the
+  # document. 9a doubles v2's measured ~9,200 prompt tokens; 9b takes the two
+  # models whose weights leave room for a 64k window up to roughly five times
+  # it. Peak GPU memory measured at num_ctx 65536 was 19,447 MiB for
+  # gpt-oss:20b and 31,195 MiB for qwen3-coder:30b of 32,760 total, so 9b is
+  # close to the card's limit and may partially offload - which the report
+  # records rather than hides.
+  [9a]="long-document sweep: ~16k-token documents, all five models|--suite v2 --category long_context --model gpt-oss:20b --model qwen3-coder:30b --model qwen3.5:35b --model glm-4.7-flash:latest --model qwen3.8:27b --repetitions 2 --warmup 1 --filler 16000 --context 32768 --timeout 1800"
+  [9b]="long-document sweep: ~40k-token documents, the two models that fit a 64k window|--suite v2 --category long_context --model gpt-oss:20b --model qwen3-coder:30b --repetitions 2 --warmup 1 --filler 40000 --context 65536 --timeout 2400"
 )
 
 if [[ "${1:-}" == "list" || -z "${1:-}" ]]; then
     echo "Stages (see docs/CANDIDATES.md for the rationale):"
-    for key in 1 2 3 4 5a 5b 5c 8a 8b; do
+    for key in 1 2 3 4 5a 5b 5c 8a 8b 9a 9b; do
         printf "  %-3s %s\n" "$key" "${STAGES[$key]%%|*}"
     done
     echo

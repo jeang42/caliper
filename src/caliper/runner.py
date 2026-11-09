@@ -57,6 +57,12 @@ class RunSettings:
     max_output_tokens_override: int | None = None
     context_length: int = 8192
     context_length_override: int | None = None
+    # Replaces each long-context task's own ``filler_tokens``, which is the
+    # only way to vary document length: document size lives in the task
+    # definition, not in the engine options, so --context cannot move it.
+    # Applies only to tasks that already generate filler; it never injects a
+    # document into a task that has none.
+    filler_tokens_override: int | None = None
     keep_alive: str = "5m"
     unload_after_run: bool = True
     request_timeout_s: float = 300.0
@@ -106,6 +112,54 @@ def build_options(settings: RunSettings, task: Task) -> dict[str, Any]:
     if settings.seed is not None:
         options["seed"] = settings.seed
     return options
+
+
+def effective_filler_tokens(settings: RunSettings, task: Task) -> int | None:
+    """Document size for one task, after any command-line override.
+
+    A task with no filler of its own is left alone: the override is a scale
+    knob for the long-context category, not a way to pad unrelated prompts.
+    """
+    if task.filler_tokens is None:
+        return None
+    return settings.filler_tokens_override or task.filler_tokens
+
+
+# Measured ratio of engine-counted prompt tokens to requested filler tokens,
+# taken from the stage 8a attempts (8498/8000 = 1.06 for gpt-oss:20b up to
+# 9800/8000 = 1.23 for the qwen3 tokenizers). Rounded up, because the guard
+# below exists to catch a prompt that will not fit and a generous factor fails
+# safe: it refuses a borderline run rather than letting the engine truncate
+# the document and report a long-context score for a document it never saw.
+PROMPT_TOKENS_PER_FILLER_TOKEN = 1.3
+
+
+def filler_fit_problems(settings: RunSettings, tasks: list[Task]) -> list[str]:
+    """Tasks whose document plus output budget cannot fit their context window.
+
+    Ollama's ``num_ctx`` covers the prompt and the generation together, and it
+    discards the overflow silently. That turns an oversized document into a
+    quality measurement of a document the model was never shown, which is the
+    one failure mode this project cannot tolerate. Raising ``--filler`` without
+    raising ``--context`` is the obvious way to hit it.
+    """
+    problems = []
+    for task in tasks:
+        filler = effective_filler_tokens(settings, task)
+        if not filler:
+            continue
+        options = build_options(settings, task)
+        num_ctx = int(options["num_ctx"])
+        predict = int(options["num_predict"])
+        estimated = int(filler * PROMPT_TOKENS_PER_FILLER_TOKEN) + predict
+        if estimated > num_ctx:
+            problems.append(
+                f"{task.id}: {filler} filler tokens render to roughly "
+                f"{int(filler * PROMPT_TOKENS_PER_FILLER_TOKEN)} prompt tokens (ESTIMATE) "
+                f"plus {predict} output tokens, over num_ctx {num_ctx}; "
+                "raise --context or lower --filler"
+            )
+    return problems
 
 
 def _interrupt_guard() -> Callable[[], bool]:
@@ -194,6 +248,16 @@ class BenchmarkRunner:
         tasks = self.select_tasks(suite)
         if not tasks:
             raise ValueError("no tasks selected")
+
+        fit = filler_fit_problems(settings, tasks)
+        if fit:
+            detail = "; ".join(fit)
+            if not settings.force:
+                raise RunAborted(
+                    "the long-context document would not fit its context window, and the "
+                    f"engine truncates the overflow without saying so: {detail}"
+                )
+            log.warning("oversized long-context document overridden by --force: %s", detail)
 
         pre = self.preflight()
         if not pre.ok and not settings.dry_run:
@@ -310,7 +374,9 @@ class BenchmarkRunner:
     ) -> tuple[GenerationResult, TaskScore | None]:
         settings = self.settings
         options = build_options(settings, task)
-        prompt, _ = longctx.render(task.prompt, task.filler_tokens, seed=settings.seed or 1234)
+        prompt, _ = longctx.render(
+            task.prompt, effective_filler_tokens(settings, task), seed=settings.seed or 1234
+        )
 
         sampler = TelemetrySampler(
             interval_s=settings.telemetry_interval_s, gpu_index=settings.gpu_index

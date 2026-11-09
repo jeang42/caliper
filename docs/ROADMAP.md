@@ -17,14 +17,25 @@ all eight, and the fifth fails only by never terminating. See
 [docs/RESULTS.md](RESULTS.md). Task *structure* is not what these models find
 hard at an 8,000-token document.
 
-**The one axis still untested: document length.** `filler_tokens` is a
-per-task TOML field with no command-line override, so every long-context
+**The one axis still untested: document length.** Every long-context
 measurement to date — v1, v2, and all of stage 5 — used documents of roughly
 8,000-10,000 tokens. Stage 5 and stage 8b varied `num_ctx`, which is the
-window, not the document. A `--filler` override, or a `v2` variant sized at
-30,000 and 60,000 tokens, would answer whether these models degrade with length
-and would cost about the same as stage 8a. This is now the highest-value
-evaluation work outstanding, ahead of writing more tasks of the same kind.
+window, not the document. The `--filler` override now exists and scales each
+long-context task's document, and stages `9a` (~16,000-token documents, all
+five models) and `9b` (~40,000-token documents, the two models whose weights
+leave room for a 64k window) are scripted and waiting for GPU time. Nothing
+has been measured at any size other than ~8,000 tokens yet; until 9a and 9b
+run, this remains the highest-value evaluation work outstanding, ahead of
+writing more tasks of the same kind.
+
+The ceiling is the hardware, not the suite. Peak GPU memory measured at
+`num_ctx` 65536 was 19,447 MiB for `gpt-oss:20b` and 31,195 MiB for
+`qwen3-coder:30b` of 32,760 total, so ~40,000-token documents are near the
+limit for the larger models on this host and the three 20+ GiB models cannot
+reach a 64k window without offload. Beyond roughly 260,000 filler tokens the
+filler's own entry numbering would reach the 9000s and collide with the
+needles; a test asserts the margin, but a future host with more VRAM would
+need the needles renumbered.
 
 **Camouflaged needles, as a possible `v3`.** `v2`'s needles use entry numbers
 in the 9000s, well above the filler's own numbering, so they are findable by

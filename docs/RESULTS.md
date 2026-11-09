@@ -95,6 +95,12 @@ from each task's `filler_tokens` and stayed at roughly 9,200 prompt tokens in
 both runs. Whether these models degrade on a 30,000-token document is
 unmeasured, and nothing here speaks to it.
 
+A `--filler` override now exists (0.4.0) and stages `9a` (~16,000-token
+documents, all five models) and `9b` (~40,000-token documents, the two models
+that fit a 64k window) are scripted. **Neither has run.** No result in this
+document, or anywhere in this project, was measured at a document size other
+than roughly 8,000-10,000 tokens.
+
 ### A validator correction
 
 `qwen3-coder:30b` answered `RESULT: 13 incidents.` three times out of three and

@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.4.0 — 2026-11-08
+
+A `--filler` override on `run` and `plan`, which makes document length
+variable for the first time. **Nothing has been measured with it yet**; stages
+`9a` and `9b` are scripted and await GPU time.
+
+- `--filler N` replaces each long-context task's own `filler_tokens`. It is
+  the only knob that moves document size: `--context` moves `num_ctx`, which
+  is the window. The value is recorded in the run config and printed in the
+  report header.
+- The override applies only to tasks that already generate a document, so it
+  cannot pad an unrelated prompt and change what another category measures.
+- **A run is refused when the document cannot fit its context window.**
+  Ollama's `num_ctx` covers the prompt and the generation together and
+  discards the overflow silently, which would produce a long-context score for
+  a document the model was never shown. The check costs the estimated prompt
+  tokens (1.3 x filler tokens, from the stage 8a ratios of 1.06-1.23) plus the
+  output budget against `num_ctx`; `caliper plan` prints the same warning
+  before any GPU time is spent, and `--force` is the only way past it.
+- The viewer's rebuilt document now uses the run's filler size rather than the
+  task's, so a reviewer sees the document the model actually saw. New
+  `filler_tokens_rendered` field on the attempt-detail task object.
+- Stages `9a` (~16,000-token documents, five models) and `9b` (~40,000-token
+  documents, `gpt-oss:20b` and `qwen3-coder:30b` at `num_ctx` 65536) added to
+  `scripts/benchmark-stage.sh`.
+- Tests assert that every v2 answer stays correct at 8,000, 16,000 and 40,000
+  filler tokens — the counting task's answer is a property of the generated
+  document, so a larger document that introduced another escalated entry would
+  score every model wrong for a suite bug — and that filler entry numbers stay
+  clear of the needles' 9000s at every sweep size.
+- 261 tests.
+
 ## 0.3.1 — 2026-11-08
 
 Suite `v2` measured, in stages 8a and 8b. **The result is negative: `v2` is

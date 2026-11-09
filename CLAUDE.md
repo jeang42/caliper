@@ -117,6 +117,21 @@ Break these and the output stops being evidence.
   long-context documents repeat themselves and their entry numbers. v1's
   stored prompts are 7000-8300 tokens, not the 4000-5000 its `filler_tokens`
   suggests. Do not read `filler_tokens` as the document size for v1 tasks.
+- **`--context` does not change the document.** It sets `num_ctx`, the
+  window. Document size lives in the task's `filler_tokens` and moves only
+  with `--filler`. A whole stage was described as a length test before this
+  was noticed; length was in fact never varied until 0.4.0.
+- **An oversized prompt is truncated silently.** Ollama's `num_ctx` covers the
+  prompt and the generation together and drops the overflow without a word, so
+  a document too large for its window yields a long-context score for a
+  document the model never saw. `filler_fit_problems` refuses the run;
+  `--force` is the only way past, and the estimate is deliberately generous
+  (1.3 prompt tokens per filler token) so it fails safe.
+- **A long-context answer can be a property of the generated document.** The
+  counting task's expected value is the number of escalated entries in the
+  rendered prompt. Change the filler size or the generator and that number can
+  move, scoring every model zero for a suite bug; tests recompute it at every
+  sweep size.
 - **A fixture key must survive filler substitution.** `prompt_keys` falls back
   to the whole prompt, which for a long-context task still contains the
   placeholder; such a key can never match, and the task would be graded on an

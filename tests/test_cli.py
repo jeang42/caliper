@@ -201,3 +201,44 @@ def test_regrade_cli_reports_changes(capsys, tmp_path, monkeypatch):
 def test_regrade_without_runs_exits_nonzero(capsys):
     assert main(["regrade"]) == 2
     assert "no runs stored yet" in capsys.readouterr().err
+
+
+def test_filler_flag_reaches_the_run_settings(capsys):
+    """--filler is the documented way to vary document length; it must plumb through."""
+    code = main(
+        [
+            "plan",
+            "--dry-run",
+            "--suite",
+            "v2",
+            "--category",
+            "long_context",
+            "--filler",
+            "16000",
+            "--context",
+            "32768",
+        ]
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "filler_tokens_override: 16000" in out
+    assert "will NOT fit" not in out
+
+
+def test_plan_warns_when_the_document_will_not_fit(capsys):
+    """Plan says so before the GPU time is spent, not after."""
+    main(
+        [
+            "plan",
+            "--dry-run",
+            "--suite",
+            "v2",
+            "--category",
+            "long_context",
+            "--filler",
+            "60000",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "will NOT fit" in out
+    assert "refuses this without --force" in out

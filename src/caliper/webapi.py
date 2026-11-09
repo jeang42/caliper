@@ -196,6 +196,7 @@ def get_attempt(store: Store, attempt_id: int) -> dict[str, Any]:
         row["task_id"],
         seed=settings.get("seed"),
         render=True,
+        filler_tokens=settings.get("filler_tokens_override"),
     )
     manual = store.manual_scores(row["run_id"]).get(attempt_id)
     return {
@@ -216,7 +217,11 @@ def get_attempt(store: Store, attempt_id: int) -> dict[str, Any]:
 
 
 def _task_definition(
-    suite_name: str, task_id: str, seed: int | None = None, render: bool = False
+    suite_name: str,
+    task_id: str,
+    seed: int | None = None,
+    render: bool = False,
+    filler_tokens: int | None = None,
 ) -> dict[str, Any] | None:
     """The task as the installed suite defines it, for grading context.
 
@@ -233,8 +238,12 @@ def _task_definition(
     except (KeyError, FileNotFoundError, ValueError):
         return None
     rendered: str | None = None
-    if render and task.filler_tokens:
-        rendered, substituted = longctx.render(task.prompt, task.filler_tokens, seed=seed or 1234)
+    # The run's --filler override, not the task's own value: rebuilding with
+    # the task default would show a reviewer a document the model never saw,
+    # which is the exact failure this reconstruction exists to prevent.
+    size = (filler_tokens or task.filler_tokens) if task.filler_tokens else None
+    if render and size:
+        rendered, substituted = longctx.render(task.prompt, size, seed=seed or 1234)
         if not substituted:
             rendered = None
     return {
@@ -252,6 +261,7 @@ def _task_definition(
         "max_output_tokens": task.max_output_tokens,
         "context_length": task.context_length,
         "filler_tokens": task.filler_tokens,
+        "filler_tokens_rendered": size,
         "suite_version": suite.suite_version,
     }
 

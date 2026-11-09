@@ -377,7 +377,7 @@ async function openAttempt(attemptId) {
         <pre>${esc(task ? abbreviate(task.prompt) : "task definition not found in the installed suite")}</pre>
         ${task && task.rendered_prompt ? `<details><summary>Show the full document the model
           saw (${task.rendered_prompt.length.toLocaleString()} chars, rebuilt from this run's
-          seed)</summary><pre class="scroll">${esc(task.rendered_prompt)}</pre></details>` : ""}
+          seed and document size)</summary><pre class="scroll">${esc(task.rendered_prompt)}</pre></details>` : ""}
         ${task && task.system ? `<h2>System</h2><pre>${esc(task.system)}</pre>` : ""}</section>
       <section><h2>Response</h2>
         <pre>${a.response_text ? esc(a.response_text) : '<span class="dim">(empty)</span>'}</pre>

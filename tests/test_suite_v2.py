@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from caliper.evals import load_suite
+from caliper.evals import load_suite, longctx
 from caliper.evals.longctx import WORDS_PER_TOKEN, make_filler, render
 from caliper.evals.spec import CATEGORIES
 
@@ -340,3 +340,51 @@ def test_correct_answers_survive_common_formatting_variation(v2):
         for text in texts:
             result = GenerationResult(model="m", engine="mock", text=text)
             assert grade(task.validator, result).passed is True, (task_id, text)
+
+
+SWEEP_SIZES = (8000, 16000, 40000)
+
+
+@pytest.mark.parametrize("filler_tokens", SWEEP_SIZES)
+def test_the_correct_answers_do_not_change_when_the_document_grows(filler_tokens: int):
+    """The length sweep (stage 9) varies document size with --filler.
+
+    Every v2 answer must stay correct at every size, or the sweep would
+    measure the generator drifting rather than the model degrading. The
+    counting task is the sharp case: its answer is a property of the rendered
+    document, so more filler must not introduce another escalated entry.
+    """
+    v2 = load_suite("v2")
+    counted = v2.get("longctx.count_markers")
+    prompt, changed = longctx.render(counted.prompt, filler_tokens, seed=42)
+    assert changed
+    escalated = len(re.findall(r"Status:\s*ESCALATED", prompt))
+    assert str(escalated) == counted.validator["expected"], (filler_tokens, escalated)
+
+    # Needles must still be unique: a second occurrence anywhere in the filler
+    # would make the question ambiguous and the score meaningless.
+    for task_id, needle in (
+        ("longctx.multi_hop_chain", "R-4471"),
+        ("longctx.distractor_precision", "20764"),
+        ("longctx.sum_scattered", "18450"),
+    ):
+        text, _ = longctx.render(v2.get(task_id).prompt, filler_tokens, seed=42)
+        assert text.count(needle) == 1, (task_id, filler_tokens)
+
+
+@pytest.mark.parametrize("filler_tokens", SWEEP_SIZES)
+def test_filler_entry_numbers_stay_below_the_needles_at_every_sweep_size(filler_tokens: int):
+    """Filler numbers from 1 upward; needles sit in the 9000s.
+
+    At roughly 29 filler tokens per entry the filler would reach 9000 at about
+    260,000 filler tokens - far beyond any window this host can hold, but the
+    collision would silently create duplicate entry numbers, so the margin is
+    asserted rather than assumed.
+    """
+    v2 = load_suite("v2")
+    for task in v2.by_category(["long_context"]):
+        prompt, _ = longctx.render(task.prompt, filler_tokens, seed=42)
+        numbers = [int(n) for n in re.findall(r"(?m)^Entry (\d+)\.", prompt)]
+        filler_numbers = [n for n in numbers if n < 9000]
+        assert max(filler_numbers) < 9000
+        assert len(set(numbers)) == len(numbers), (task.id, filler_tokens)

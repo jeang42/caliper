@@ -9,6 +9,7 @@ import pytest
 from caliper import safety as safety_mod
 from caliper.backends import MockBackend
 from caliper.evals import load_suite
+from caliper.evals.longctx import render as longctx_render
 from caliper.evals.spec import Suite, Task
 from caliper.hardware import TelemetrySampler
 from caliper.runner import (
@@ -16,7 +17,9 @@ from caliper.runner import (
     RunAborted,
     RunSettings,
     build_options,
+    effective_filler_tokens,
     estimate_run_cost,
+    filler_fit_problems,
 )
 
 THRESHOLDS = {
@@ -485,3 +488,132 @@ def test_runner_does_not_wait_by_default(store, monkeypatch):
     settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0)
     runner = BenchmarkRunner(MockBackend(models=["m:1b"]), store, settings, THRESHOLDS)
     assert runner.run(tiny_suite()).attempts == 2
+
+
+def filler_suite(filler_tokens: int = 2000, context_length: int = 8192) -> Suite:
+    """A one-task long-context suite plus a task with no document at all."""
+    return Suite(
+        name="test-longctx",
+        suite_version="9.9.9",
+        tasks=[
+            Task(
+                id="t.longctx",
+                category="long_context",
+                title="document",
+                prompt="Document:\n{{FILLER:1}}\nQuestion: say OK",
+                validator={"kind": "contains_all", "needles": ["OK"]},
+                filler_tokens=filler_tokens,
+                context_length=context_length,
+                max_output_tokens=256,
+            ),
+            Task(
+                id="t.short",
+                category="instruction_following",
+                title="short",
+                prompt="say OK",
+                validator={"kind": "exact", "expected": "OK"},
+            ),
+        ],
+    )
+
+
+def test_filler_override_changes_the_document_the_model_is_sent():
+    """--filler is the only knob that moves document size.
+
+    ``--context`` moves ``num_ctx`` alone; the document comes from the task's
+    ``filler_tokens``. Stage 8b was mis-framed as a length test for exactly
+    this reason, so the override has a test proving it reaches the prompt.
+    """
+    suite = filler_suite(filler_tokens=1000, context_length=32768)
+    task = suite.get("t.longctx")
+    base = RunSettings(models=["m:1b"])
+    assert effective_filler_tokens(base, task) == 1000
+
+    bigger = RunSettings(models=["m:1b"], filler_tokens_override=4000)
+    assert effective_filler_tokens(bigger, task) == 4000
+
+    small, _ = longctx_render(task.prompt, effective_filler_tokens(base, task))
+    large, _ = longctx_render(task.prompt, effective_filler_tokens(bigger, task))
+    assert len(large) > 3 * len(small)
+
+
+def test_filler_override_never_pads_a_task_that_has_no_document():
+    """The override scales the long-context category, not every prompt."""
+    short = filler_suite().get("t.short")
+    settings = RunSettings(models=["m:1b"], filler_tokens_override=40000)
+    assert effective_filler_tokens(settings, short) is None
+
+
+def test_the_override_reaches_the_prompt_the_backend_receives(store):
+    backend = MockBackend(models=["m:1b"], default_answer="OK")
+    settings = RunSettings(
+        models=["m:1b"],
+        repetitions=1,
+        warmup_runs=0,
+        filler_tokens_override=4000,
+        context_length_override=32768,
+    )
+    BenchmarkRunner(backend, store, settings, THRESHOLDS).run(filler_suite(filler_tokens=1000))
+    sent = {c["prompt"] for c in backend.calls}
+    document = max(sent, key=len)
+    assert "{{FILLER" not in document
+    expected, _ = longctx_render(
+        "Document:\n{{FILLER:1}}\nQuestion: say OK", 4000, seed=settings.seed
+    )
+    assert document == expected
+
+
+def test_run_refuses_a_document_that_cannot_fit_its_context_window(store):
+    """Ollama discards prompt overflow silently.
+
+    An oversized document would then be scored as a long-context answer about
+    a document the model was never shown - a wrong number that looks right,
+    which is the one outcome this project treats as worse than no feature.
+    """
+    backend = MockBackend(models=["m:1b"], default_answer="OK")
+    settings = RunSettings(
+        models=["m:1b"],
+        repetitions=1,
+        warmup_runs=0,
+        filler_tokens_override=40000,
+    )
+    runner = BenchmarkRunner(backend, store, settings, THRESHOLDS)
+    with pytest.raises(RunAborted, match="would not fit"):
+        runner.run(filler_suite(filler_tokens=1000, context_length=8192))
+    assert backend.calls == []
+
+
+def test_force_overrides_the_fit_check_and_the_run_proceeds(store):
+    backend = MockBackend(models=["m:1b"], default_answer="OK")
+    settings = RunSettings(
+        models=["m:1b"],
+        repetitions=1,
+        warmup_runs=0,
+        filler_tokens_override=40000,
+        force=True,
+    )
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(
+        filler_suite(filler_tokens=1000, context_length=8192)
+    )
+    assert outcome.status == "completed"
+
+
+def test_the_fit_check_passes_when_context_is_raised_to_match():
+    suite = filler_suite(filler_tokens=1000, context_length=8192)
+    tasks = suite.tasks
+    tight = RunSettings(models=["m:1b"], filler_tokens_override=16000)
+    assert filler_fit_problems(tight, tasks)
+    roomy = RunSettings(
+        models=["m:1b"], filler_tokens_override=16000, context_length_override=32768
+    )
+    assert filler_fit_problems(roomy, tasks) == []
+
+
+def test_the_fit_check_counts_the_output_budget_too():
+    """num_ctx holds the prompt and the generation together, not the prompt alone."""
+    suite = filler_suite(filler_tokens=1000, context_length=8192)
+    task = suite.get("t.longctx")
+    task.max_output_tokens = 256
+    settings = RunSettings(models=["m:1b"], filler_tokens_override=6200)
+    # 6200 * 1.3 = 8060, under num_ctx 8192 on its own; with 256 output it is not.
+    assert filler_fit_problems(settings, [task])

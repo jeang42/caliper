@@ -162,8 +162,30 @@ moving on.
    - **8b**: the top two models again at `--context 32768`, which extends the
      stage 5 scaling curve onto tasks that can actually fail.
 
-   Both are scripted: `./scripts/benchmark-stage.sh 8a`. They need no
-   download, and nothing about them is measured yet.
+   Both are scripted: `./scripts/benchmark-stage.sh 8a`. **Both have now run,
+   and the answer was negative**: v2 is saturated too, four of five models at
+   1.00 on all eight tasks at both window sizes. See [RESULTS.md](RESULTS.md).
+9. **The document-length sweep.** Stages 8a and 8b settled that task structure
+   is not the binding constraint, and in the process established that document
+   length had never been varied at all: every long-context measurement in this
+   project used a document of roughly 8,000-10,000 tokens, because size lives
+   in each task's `filler_tokens` and `--context` moves only the window. The
+   `--filler` override exists as of 0.4.0 and these two stages use it.
+   - **9a**: all five models, `--filler 16000 --context 32768`, 2 repetitions.
+     Roughly double every document measured so far. Estimated 12-25 minutes;
+     the estimator costs it from history at half the document size, so treat
+     it as a floor — prompt evaluation is the part that grows.
+   - **9b**: `gpt-oss:20b` and `qwen3-coder:30b` at `--filler 40000 --context
+     65536`, roughly five times the measured document size. Only these two fit
+     a 64k window: peak GPU memory at `num_ctx` 65536 measured 19,447 MiB and
+     31,195 MiB of 32,760 total, so 9b is close to the card's limit and
+     `qwen3-coder:30b` may partially offload, which the report records.
+
+   Scripted as `./scripts/benchmark-stage.sh 9a`. Neither has run, and no
+   result at any document size other than ~8,000 tokens exists yet. If models
+   hold at 1.00 through 9b, the honest conclusion is that this hardware cannot
+   hold a document large enough to challenge them, and the category should be
+   reported as a pass/fail gate rather than a discriminator.
 
 ## Proposed download plan
 

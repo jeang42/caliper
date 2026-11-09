@@ -584,6 +584,12 @@ def render_markdown(summary: dict[str, Any]) -> str:
             + ", ".join(str(v) for v in predict)
             + " (tasks carry their own budgets unless overridden on the command line)"
         )
+        filler = settings.get("filler_tokens_override")
+        if filler:
+            add(
+                f"- Long-context document size overridden to ~{filler} filler tokens per task, "
+                "replacing each task's own value"
+            )
     add("")
 
     add("## Quality by category")

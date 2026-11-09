@@ -451,3 +451,43 @@ def test_attempt_detail_has_no_rendered_prompt_for_a_short_task(store, run_id):
         if a["category"] != "long_context"
     )
     assert webapi.get_attempt(store, attempt["id"])["task"]["rendered_prompt"] is None
+
+
+def test_attempt_detail_rebuilds_an_overridden_document_at_the_size_actually_used(store):
+    """A run with --filler must rebuild at the run's size, not the task's.
+
+    Rebuilding from ``task.filler_tokens`` would show a reviewer a document
+    the model never saw, which is the exact failure the reconstruction exists
+    to prevent - and it would look plausible, because the prose is the same
+    generator either way.
+    """
+    v2 = load_suite("v2")
+    suite = Suite(
+        name="v2", suite_version=v2.suite_version, tasks=[v2.get("longctx.count_markers")]
+    )
+    sent: list[str] = []
+    backend = mock_backend_for_suite(suite, models=["m:1b"])
+    inner = backend.generate
+
+    def record(model, prompt, **kwargs):
+        sent.append(prompt)
+        return inner(model, prompt, **kwargs)
+
+    backend.generate = record  # type: ignore[method-assign]
+    settings = RunSettings(
+        models=["m:1b"],
+        repetitions=1,
+        warmup_runs=0,
+        suite="v2",
+        seed=7,
+        filler_tokens_override=2000,
+        context_length_override=32768,
+    )
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(suite)
+
+    (attempt,) = webapi.list_attempts(store, outcome.run_id)["attempts"]
+    task = webapi.get_attempt(store, attempt["id"])["task"]
+    assert task["rendered_prompt"] == sent[0]
+    assert task["filler_tokens_rendered"] == 2000
+    assert task["filler_tokens"] == suite.get("longctx.count_markers").filler_tokens
+    assert task["filler_tokens_rendered"] != task["filler_tokens"]

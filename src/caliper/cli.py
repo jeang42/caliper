@@ -24,7 +24,13 @@ from .inventory import collect_inventory, render_report
 from .logging_setup import setup_logging
 from .regrade import regrade_run
 from .report import PROFILES, render_markdown, summarize_run
-from .runner import BenchmarkRunner, RunAborted, RunSettings, estimate_run_cost
+from .runner import (
+    BenchmarkRunner,
+    RunAborted,
+    RunSettings,
+    estimate_run_cost,
+    filler_fit_problems,
+)
 from .server import serve
 from .storage import Store
 
@@ -138,6 +144,7 @@ def _run_settings(args: argparse.Namespace, config: Config) -> RunSettings:
         max_output_tokens_override=args.max_tokens,
         context_length=run_cfg["context_length"],
         context_length_override=args.context,
+        filler_tokens_override=args.filler,
         keep_alive=args.keep_alive or run_cfg["keep_alive"],
         unload_after_run=not args.no_unload and run_cfg["unload_after_run"],
         request_timeout_s=args.timeout
@@ -175,6 +182,13 @@ def cmd_plan(args: argparse.Namespace, config: Config) -> int:
         print(f"\n{len(needs_exec)} task(s) will be SKIPPED without --allow-code-execution:")
         for t in needs_exec:
             print(f"  {t}")
+    fit = filler_fit_problems(settings, tasks)
+    if fit:
+        print()
+        print("Long-context documents that will NOT fit their context window:")
+        for problem in fit:
+            print(f"  {problem}")
+        print("  `caliper run` refuses this without --force.")
     print()
     print("Estimated cost (ESTIMATE):")
     for key, value in cost.items():
@@ -420,6 +434,14 @@ def build_parser() -> argparse.ArgumentParser:
         )
         p.add_argument(
             "--context", type=int, help="num_ctx; overrides each task's own value when given"
+        )
+        p.add_argument(
+            "--filler",
+            type=int,
+            help=(
+                "long-context document size in filler tokens; overrides each task's own "
+                "filler_tokens. Raise --context to match, or the run is refused"
+            ),
         )
         p.add_argument("--keep-alive")
         p.add_argument(
