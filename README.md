@@ -33,7 +33,7 @@ without `nvidia-smi` the GPU checks report *unknown* and the evaluation side
 works unchanged.
 
 ```sh
-git clone <this repository>
+git clone https://github.com/jeang42/caliper.git
 cd caliper
 uv venv --python 3.12 .venv            # or: python3 -m venv .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
