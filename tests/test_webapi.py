@@ -184,7 +184,7 @@ def test_set_grade_from_criteria_computes_the_fraction(store, run_id):
                 {"text": "c", "met": False},
                 {"text": "d", "met": False},
             ],
-            "grader": "jeff",
+            "grader": "a-human",
             "notes": "partially argued",
         },
     )

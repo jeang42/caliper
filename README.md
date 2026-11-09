@@ -26,8 +26,13 @@ out as Markdown reports, JSON and CSV.
 
 ## Install
 
+Python 3.11 or newer; no runtime dependencies. An NVIDIA GPU is optional —
+without `nvidia-smi` the GPU checks report *unknown* and the evaluation side
+works unchanged.
+
 ```sh
-cd /path/to/llm-benchmark
+git clone <this repository>
+cd caliper
 uv venv --python 3.12 .venv            # or: python3 -m venv .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/caliper --version
@@ -238,6 +243,10 @@ is not ground truth.
 - [CLAUDE.md](CLAUDE.md) — working agreement for coding agents: invariants,
   metric definitions, and the mistakes already made once
 
+## License
+
+MIT. See [LICENSE](LICENSE).
+
 ## Development
 
 ```sh
@@ -247,4 +256,10 @@ is not ground truth.
 ```
 
 Tests never touch the GPU or the network: the Ollama adapter is tested against
-recorded stream fixtures and the runner against the mock backend.
+recorded stream fixtures and the runner against the mock backend. CI runs the
+same three commands plus a full dry run on Python 3.11, 3.12 and 3.13.
+
+The measured results in [docs/RESULTS.md](docs/RESULTS.md) come from one
+host — an RTX 5000 Ada with 32,760 MiB of VRAM — and are provenance for those
+numbers, not a claim about your machine. Re-run the suite on your own hardware
+before trusting any of the rankings there.

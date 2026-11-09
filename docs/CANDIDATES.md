@@ -217,8 +217,7 @@ stages 1-5, which use only installed models.
 - `qwen3:32b` reports only 40960 tokens of context, far less than the
   262144 of the Qwen3 MoE builds. Do not compare long-context results across
   those two without noting it.
-- vLLM 0.11.0 is installed in a separate conda environment
-  (Python 3.11.13, torch 2.8.0+cu128) and is
-  not running. It cannot load Ollama's GGUF/MXFP4 artifacts directly, so a
+- vLLM 0.11.0 is installed in a separate conda environment on the benchmark
+  host (Python 3.11.13, torch 2.8.0+cu128) and is not running. It cannot load Ollama's GGUF/MXFP4 artifacts directly, so a
   like-for-like comparison needs separately obtained weights. See
   [ROADMAP.md](ROADMAP.md).

@@ -67,9 +67,8 @@ turn `tool.multistep_plan` from a written plan into an executed workflow.
 
 ## Phase 6: the vLLM comparison
 
-vLLM 0.11.0 is installed on this host in a separate conda environment
-(Python 3.11.13, torch 2.8.0+cu128) and is
-not running. Nothing about it has been started or reconfigured.
+vLLM 0.11.0 is installed on the benchmark host in a separate conda
+environment (Python 3.11.13, torch 2.8.0+cu128) and is not running. Nothing about it has been started or reconfigured.
 
 ### What has to be true first
 

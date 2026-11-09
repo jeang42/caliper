@@ -15,3 +15,9 @@ inventory/
 *.sqlite3
 *.db
 .env
+
+# Editor and OS cruft
+.DS_Store
+.idea/
+.vscode/
+*.swp
