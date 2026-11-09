@@ -452,17 +452,40 @@ function wireGradeForm(attemptId, task) {
 async function openGrading(runId) {
   state.view = "grading";
   setNav("grading");
+  // Open on a run that actually has rubric work. Defaulting to the newest run
+  // showed an empty queue whenever the newest run was long-context only, which
+  // looks exactly like a broken page.
+  const overview = await api("/api/grading");
+  if (!overview.runs.length) {
+    main.innerHTML = `<section><h2>Rubric grading queue</h2>
+      <p class="dim">No run contains rubric tasks yet. Rubric tasks live in the
+      <code>agent</code>, <code>coding</code>, <code>reasoning</code> and
+      <code>tool_use</code> categories; a run of <code>long_context</code> alone
+      has none. Run the full suite, or a category that includes them, and they
+      will appear here.</p></section>`;
+    return;
+  }
   if (!runId) {
-    const { runs } = await api("/api/runs");
-    const real = runs.filter((r) => !r.dry_run);
-    if (!real.length) { main.innerHTML = `<section><p class="dim">No real runs yet.</p></section>`; return; }
-    runId = state.runId || real[0].id;
+    const withWork = overview.runs.find((r) => r.decisions_remaining > 0);
+    runId = state.runId || (withWork || overview.runs[0]).run_id;
   }
   state.runId = runId;
   const d = await api(`/api/runs/${encodeURIComponent(runId)}/grading`);
+  const picker = `<div class="row" style="margin:6px 0 10px">
+    <span class="dim">Runs with rubric tasks:</span>
+    ${overview.runs.map((r) => `
+      <label class="pill clickable ${r.run_id === runId ? "good" : ""}"
+        data-gradingrun="${esc(r.run_id)}">${esc(r.run_id.slice(0, 8))}
+        ${r.decisions_remaining ? `· ${r.decisions_remaining} left`
+          : '· <span class="good">done</span>'}</label>`).join("")}
+    <span class="dim">${overview.decisions_remaining} judgement(s) outstanding in all</span>
+  </div>`;
   const doneFrac = d.decisions ? (d.decisions - d.decisions_remaining) / d.decisions : 0;
   main.innerHTML = `
     <section><h2>Rubric grading queue · <code>${esc(runId)}</code></h2>
+      ${picker}
+      ${d.decisions === 0 ? `<p class="note">This run has no rubric attempts:
+        its tasks are all automatically graded. Pick another run above.</p>` : ""}
       <div class="row"><div style="flex:1">
         <div class="bar"><i style="width:${(doneFrac * 100).toFixed(1)}%"></i></div>
       </div><span class="dim">${d.decisions - d.decisions_remaining} / ${d.decisions}
@@ -492,6 +515,9 @@ async function openGrading(runId) {
   main.querySelectorAll("tr[data-group]").forEach((tr) => {
     const [taskId, model] = tr.dataset.group.split("|");
     tr.onclick = () => openGroup(d, taskId, model);
+  });
+  main.querySelectorAll("[data-gradingrun]").forEach((el) => {
+    el.onclick = () => openGrading(el.dataset.gradingrun);
   });
 }
 

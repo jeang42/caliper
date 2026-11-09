@@ -31,6 +31,7 @@ from .webapi import (
     delete_grade,
     get_attempt,
     get_run,
+    grading_overview,
     grading_queue,
     list_attempts,
     list_runs,
@@ -87,6 +88,8 @@ def route_get(store: Store, path: str, params: dict[str, list[str]]) -> Any:
             include_warmup=_flag(params, "warmup"),
             only_ungraded=_flag(params, "ungraded"),
         )
+    if parts == ["api", "grading"]:
+        return grading_overview(store)
     if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "grading":
         return grading_queue(store, parts[2])
     if len(parts) == 3 and parts[:2] == ["api", "attempts"]:

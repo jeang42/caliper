@@ -277,6 +277,21 @@ def _response_digest(text: str | None) -> str:
     return hashlib.sha256(" ".join((text or "").split()).encode()).hexdigest()[:16]
 
 
+def grading_overview(store: Store) -> dict[str, Any]:
+    """Which runs have rubric judgements outstanding.
+
+    Without this the viewer had to guess a run, and guessing the newest one
+    showed an empty queue whenever the newest run happened to contain no
+    rubric tasks.
+    """
+    runs = [dict(row) for row in store.runs_with_rubric_work()]
+    return {
+        "runs": runs,
+        "decisions_remaining": sum(r["decisions_remaining"] for r in runs),
+        "attempts_remaining": sum(r["unscored"] for r in runs),
+    }
+
+
 def grading_queue(store: Store, run_id: str) -> dict[str, Any]:
     """Attempts at manually graded tasks, with their criteria and any score.
 
@@ -352,6 +367,8 @@ def grading_queue(store: Store, run_id: str) -> dict[str, Any]:
     done = sum(1 for q in queue if q["scored"])
     return {
         "run_id": run_id,
+        "suite": run["suite"],
+        "label": run["label"],
         "queue": queue,
         "groups": grouped,
         "total": len(queue),

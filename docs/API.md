@@ -88,6 +88,12 @@ remains the unrendered template.
 
 ### Grouped rubric grading
 
+`GET /api/grading` lists the runs that contain rubric attempts, each with
+`decisions`, `decisions_remaining`, `attempts` and `unscored`, plus overall
+`decisions_remaining` and `attempts_remaining`. Call it before choosing a run:
+a run with no rubric tasks has an empty queue, which is correct and looks like
+a fault.
+
 `GET /api/runs/<id>/grading` returns `queue` (one entry per attempt, as
 before) and `groups` (one entry per task and model), plus `decisions` and
 `decisions_remaining` beside `total` and `scored`. Each group carries

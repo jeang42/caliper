@@ -590,3 +590,41 @@ def test_a_group_grade_rejects_an_empty_or_malformed_list(store, run_id):
     for bad in ([], "7", [None]):
         with pytest.raises(webapi.ApiError):
             webapi.set_grade(store, {"attempt_ids": bad, "score": 1, "max_score": 1})
+
+
+def test_grading_overview_lists_only_runs_with_rubric_work(store, run_id):
+    """The grading tab showed an empty queue and looked broken.
+
+    It defaulted to the newest run. The newest runs were long-context only,
+    which contains no rubric tasks, so the queue was correctly empty with
+    nothing on screen to say why and no way to reach a run that had work.
+    """
+    overview = webapi.grading_overview(store)
+    (entry,) = overview["runs"]
+    assert entry["run_id"] == run_id
+    assert entry["decisions"] == 1
+    assert entry["decisions_remaining"] == 1
+    assert entry["unscored"] == entry["attempts"] == 2
+    assert overview["decisions_remaining"] == 1
+
+    group = webapi.grading_queue(store, run_id)["groups"][0]
+    webapi.set_grade(store, {"attempt_ids": group["attempt_ids"], "score": 1, "max_score": 1})
+    after = webapi.grading_overview(store)
+    assert after["runs"][0]["decisions_remaining"] == 0
+    assert after["decisions_remaining"] == 0
+    assert after["attempts_remaining"] == 0
+
+
+def test_grading_overview_omits_a_run_with_no_rubric_tasks(store):
+    """A long-context-only run must not appear as grading work."""
+    v2 = load_suite("v2")
+    suite = Suite(
+        name="v2", suite_version=v2.suite_version, tasks=[v2.get("longctx.count_markers")]
+    )
+    backend = mock_backend_for_suite(suite, models=["m:1b"])
+    settings = RunSettings(models=["m:1b"], repetitions=1, warmup_runs=0, suite="v2")
+    outcome = BenchmarkRunner(backend, store, settings, THRESHOLDS).run(suite)
+
+    assert webapi.grading_overview(store)["runs"] == []
+    empty = webapi.grading_queue(store, outcome.run_id)
+    assert empty["decisions"] == 0 and empty["groups"] == []

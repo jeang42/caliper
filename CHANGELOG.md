@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.1 — 2026-11-09
+
+Fixes an empty Grading tab, reported as "I see nothing in the grading tab".
+
+- The tab defaulted to the newest run. The newest runs were long-context only,
+  which contains no rubric tasks, so the queue was correctly empty — with
+  nothing on screen to say why and no way to reach a run that had work.
+- New `GET /api/grading` lists the runs that contain rubric attempts with
+  their outstanding judgement counts. The tab now opens on a run that has
+  work, shows a picker for the others, and says plainly when a run's tasks are
+  all automatically graded.
+- 278 tests, including the HTTP route and a regression test for a
+  long-context-only run never appearing as grading work.
+
 ## 0.7.0 — 2026-11-09
 
 The rubric grading queue groups repetitions, which is what makes it

@@ -268,3 +268,13 @@ def test_grouped_grading_works_over_http_end_to_end(live):
 
     _, body, _ = get(f"{base}/api/runs/{run_id}/grading")
     assert json.loads(body)["decisions_remaining"] == 0
+
+
+def test_grading_overview_is_reachable_over_http(live):
+    """The viewer calls /api/grading before it can pick a run."""
+    base, run_id = live
+    status, body, _ = get(f"{base}/api/grading")
+    assert status == 200
+    payload = json.loads(body)
+    assert [r["run_id"] for r in payload["runs"]] == [run_id]
+    assert payload["decisions_remaining"] >= 1

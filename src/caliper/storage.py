@@ -418,6 +418,40 @@ class Store:
             return None
         return float(row["spa"]), int(row["n"])
 
+    def runs_with_rubric_work(self) -> list[sqlite3.Row]:
+        """Real runs that contain rubric attempts, with their pending counts.
+
+        The grading tab used to default to the newest run, which for a
+        long-context-only run has no rubric attempts at all: the queue was
+        correctly empty and looked broken. This lets the viewer open on a run
+        that actually has work and list the others.
+
+        ``decisions`` counts distinct (task, model) groups, which is the number
+        of judgements a grader makes; ``decisions_remaining`` counts the groups
+        with at least one attempt still unscored.
+        """
+        return list(
+            self._conn.execute(
+                """SELECT r.id            AS run_id,
+                          r.created_at    AS created_at,
+                          r.label         AS label,
+                          r.suite         AS suite,
+                          COUNT(*)        AS attempts,
+                          SUM(CASE WHEN m.attempt_id IS NULL THEN 1 ELSE 0 END) AS unscored,
+                          COUNT(DISTINCT a.task_id || '|' || a.model) AS decisions,
+                          COUNT(DISTINCT CASE WHEN m.attempt_id IS NULL
+                                              THEN a.task_id || '|' || a.model END)
+                                          AS decisions_remaining
+                     FROM attempts a
+                     JOIN runs r ON r.id = a.run_id
+                     LEFT JOIN manual_scores m ON m.attempt_id = a.id
+                    WHERE r.dry_run = 0 AND a.is_warmup = 0
+                          AND a.graded IN ('manual_rubric', 'no_output')
+                 GROUP BY r.id
+                 ORDER BY decisions_remaining DESC, r.created_at DESC"""
+            ).fetchall()
+        )
+
     def measured_prompt_token_ratio(self, model: str) -> tuple[float, int] | None:
         """Prompt tokens the engine counted per filler token requested, by model.
 
