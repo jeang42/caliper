@@ -17,22 +17,46 @@ all eight, and the fifth fails only by never terminating. See
 [docs/RESULTS.md](RESULTS.md). Task *structure* is not what these models find
 hard at an 8,000-token document.
 
-**The one axis still untested: document length.** Every long-context
-measurement to date — v1, v2, and all of stage 5 — used documents of roughly
-8,000-10,000 tokens. Stage 5 and stage 8b varied `num_ctx`, which is the
-window, not the document. The `--filler` override now exists and scales each
-long-context task's document, and stages `9a` (~16,000-token documents, all
-five models) and `9b` (~40,000-token documents, the two models whose weights
-leave room for a 64k window) are scripted and waiting for GPU time. Nothing
-has been measured at any size other than ~8,000 tokens yet; until 9a and 9b
-run, this remains the highest-value evaluation work outstanding, ahead of
-writing more tasks of the same kind.
+**Document length was the missing axis, and it is now measured.** Stages 9a
+and 9b took the documents from ~9,000 to ~17,000 and ~40,000 tokens with
+`--filler`. Both models tested at ~40,000 fell to 0.88, and every loss came
+from `longctx.event_ordering` — correct retrieval followed by a wrong sort.
+See [RESULTS.md](RESULTS.md). The category discriminates now, but through one
+task out of eight, which is a thin instrument.
 
-The ceiling is the hardware, not the suite. Peak GPU memory measured at
-`num_ctx` 65536 was 19,447 MiB for `gpt-oss:20b` and 31,195 MiB for
-`qwen3-coder:30b` of 32,760 total, so ~40,000-token documents are near the
-limit for the larger models on this host and the three 20+ GiB models cannot
-reach a 64k window without offload. Beyond roughly 260,000 filler tokens the
+**What that suggests next, in order.**
+
+1. **More whole-document aggregation tasks.** The one task that fails at
+   length is the one that must combine four facts scattered through the
+   document and order them. The seven that hold are single-needle retrieval,
+   supersession, distractor rejection, absence, counting and arithmetic. A
+   `v3` weighted toward cross-document aggregation — ordering, grouping,
+   reconciling two lists, finding the one inconsistency — would likely
+   discriminate at ~17,000 tokens rather than needing 40,000, which matters
+   because only two models here fit a 64k window.
+2. **A length curve, not two points.** 9a and 9b are two sizes. The shape
+   between them is unknown: the drop could be a cliff somewhere near 24,000
+   tokens or a slope. `--filler 24000 --context 49152` on `gpt-oss:20b` and
+   `qwen3-coder:30b` would cost about ten minutes and place the knee.
+3. **A per-model prompt-token ratio.** The fit guard assumes 1.3 prompt tokens
+   per filler token for every model. Measured ratios are 1.013 for
+   `gpt-oss:20b`, 1.051 for `glm-4.7-flash` and 1.14 for the qwen3 tokenizers,
+   so the guard refused a legitimate glm diagnostic that `--force` then ran
+   safely. Storing a measured ratio per model and using it when one exists
+   would remove the false refusal without weakening the check.
+4. **Reasoning budget as a declared model property.** `glm-4.7-flash` needs
+   3x the output budget other models finish inside, and recovers 4 of 5 failed
+   tasks when given it. That is a measurable per-model number, not a suite
+   constant, and it belongs in the model record rather than being rediscovered
+   by every run that scores glm zero.
+
+The ceiling is the hardware, not the suite. Measured at `num_ctx` 65536,
+`gpt-oss:20b` peaks at 19,447 MiB and stays fully resident, while
+`qwen3-coder:30b` peaks at 31,195 MiB of 32,760 and the engine offloads 29% of
+it — output throughput falls to a quarter and prompt processing to an eighth,
+with a 24-second TTFT. The three 20+ GiB models cannot reach a 64k window at
+all without offload, so anything past ~40,000-token documents on this host is
+a `gpt-oss:20b`-only experiment. Beyond roughly 260,000 filler tokens the
 filler's own entry numbering would reach the 9000s and collide with the
 needles; a test asserts the margin, but a future host with more VRAM would
 need the needles renumbered.

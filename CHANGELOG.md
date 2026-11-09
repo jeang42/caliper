@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0 — 2026-11-09
+
+**Document length is what degrades these models.** Stages 9a and 9b, plus a
+glm budget diagnostic. Full figures in [docs/RESULTS.md](docs/RESULTS.md).
+
+- At ~40,000-token documents both models that fit a 64k window fall to 0.88
+  from 1.00 at ~9,000. Every loss is one task, `longctx.event_ordering`:
+  retrieval of all four scattered events succeeds and the chronological sort
+  then fails, identically on repeated attempts. The other seven v2 tasks hold
+  at 1.00 at every size measured, so length attacks whole-document
+  aggregation first and single-needle retrieval not at all.
+- `qwen3-coder:30b` at `num_ctx` 65536 offloads 29% to CPU: 35.8 output tok/s
+  against 137.5 at 8k, 879 prompt tok/s against 7,215, and a 24-second TTFT.
+  Past ~40,000-token documents this host is `gpt-oss:20b` only.
+- `glm-4.7-flash`'s 0.56 at ~17,000 tokens is mostly a budget artifact.
+  Re-running its five failures with `--max-tokens 12288` recovered four;
+  `longctx.multi_hop_chain` still exhausts 12,288 tokens on 49,184 characters
+  of reasoning. It needs roughly 3x the budget other models finish inside.
+- The fit guard refused that diagnostic, correctly and too conservatively: its
+  generic 1.3 prompt tokens per filler token is wrong for glm's tokenizer
+  (measured 1.051). Run with `--force` and `num_ctx` held at 9a's value so the
+  two runs stay comparable; the override is recorded in the run.
+- Published as a public repository: MIT licence, NOTICE, CI on 3.11-3.13,
+  attribution, and a release scan. The packaged version had drifted (metadata
+  said 0.1.0 while the package said 0.4.0) and is now single-sourced.
+- 264 tests.
+
 ## 0.4.0 — 2026-11-08
 
 A `--filler` override on `run` and `plan`, which makes document length

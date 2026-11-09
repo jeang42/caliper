@@ -83,7 +83,7 @@ genuine failure to terminate, not a budget artifact — the same behaviour
 `gpt-oss:20b` shows on v1's negative-constraint instruction tasks. Its 0.67 on
 `absent_fact` is one further truncation of the same kind.
 
-### Context length is not the explanation, and document length is still untested
+### Context length is not the explanation; document length is
 
 Stage 8b re-ran the same eight tasks at `num_ctx` 32768. Every score stayed
 1.00 for both models. This is consistent with stage 5: a larger window costs
@@ -92,14 +92,97 @@ nothing in quality.
 It is **not** a test of longer documents, and an earlier note in this project
 said it was. `--context` raises `num_ctx` only; the documents are generated
 from each task's `filler_tokens` and stayed at roughly 9,200 prompt tokens in
-both runs. Whether these models degrade on a 30,000-token document is
-unmeasured, and nothing here speaks to it.
+both runs, so nothing in stages 5 or 8 speaks to document length. Stages 9a
+and 9b, below, do.
 
-A `--filler` override now exists (0.4.0) and stages `9a` (~16,000-token
-documents, all five models) and `9b` (~40,000-token documents, the two models
-that fit a 64k window) are scripted. **Neither has run.** No result in this
-document, or anywhere in this project, was measured at a document size other
-than roughly 8,000-10,000 tokens.
+### Document length is what breaks them
+
+Measured 2026-11-09. Stage 9a, run `a81725976273479e`, 17.3 minutes, 85
+attempts, 0 failures, `--filler 16000 --context 32768`, 2 repetitions, five
+models. Stage 9b, run `65a2911f4f2f4b6f`, 34 attempts, 0 failures,
+`--filler 40000 --context 65536`, 2 repetitions, the two models whose weights
+leave room for a 64k window. Both under suite version 2.0.1.
+
+Stages 9a and 9b varied the document itself with `--filler`. This is the one
+axis that produced a failure in a healthy model.
+
+| Model | ~9k doc (8a) | ~17-19k doc (9a) | ~40-45k doc (9b) |
+|---|---|---|---|
+| `gpt-oss:20b` | 1.00 | 1.00 | **0.88** |
+| `qwen3-coder:30b` | 1.00 | **0.94** | **0.88** |
+| `qwen3.5:35b` | 1.00 | 1.00 | not run (no 64k window) |
+| `qwen3.8:27b` | 1.00 | 1.00 | not run (no 64k window) |
+| `glm-4.7-flash` | 0.83 | 0.56 | not run (no 64k window) |
+
+Every loss in that table comes from **one task**, `longctx.event_ordering`,
+which asks for four scattered events in chronological order. At ~40,000 tokens
+both models fail it on every attempt (4 of 4), and the failure is not
+retrieval. `qwen3-coder:30b` quotes all four entries correctly and then sorts
+them wrong, identically on both repetitions:
+
+```
+- KAPPA: day 59
+- THETA: day 212
+- OMEGA: day 134
+- SIGMA: day 341
+Order: KAPPA, THETA, OMEGA, SIGMA
+```
+
+The correct order is KAPPA, OMEGA, THETA, SIGMA. The model contradicts its own
+list two lines above it. `gpt-oss:20b` fails the same task two ways: one
+attempt mis-sorts (`KAPPA, SIGMA, OMEGA, THETA`), the other spends its whole
+budget on reasoning and emits nothing. Retrieval over 40,000 tokens succeeds;
+ordering four numbers it has already written down fails.
+
+The seven other v2 tasks stay at 1.00 for both models at every size measured.
+So the degradation is specific, not general: aggregation across the whole
+document is what length attacks first, while single-needle retrieval,
+supersession, distractor rejection, absence and arithmetic hold.
+
+Performance degrades at the same time, and for `qwen3-coder:30b` it falls off
+a cliff because a 64k window no longer fits:
+
+| Model | stage | prompt tok | out tok/s | prompt tok/s | TTFT s | residency |
+|---|---|---|---|---|---|---|
+| `gpt-oss:20b` | 8a | 8,498 | 116.6 | 9,109 | 0.38 | 100% GPU |
+| `gpt-oss:20b` | 9a | 16,202 | 111.4 | 8,882 | 0.96 | 100% GPU |
+| `gpt-oss:20b` | 9b | 40,170 | 99.0 | 6,935 | 2.88 | 100% GPU |
+| `qwen3-coder:30b` | 8a | 9,506 | 137.5 | 7,215 | 0.48 | 100% GPU |
+| `qwen3-coder:30b` | 9a | 18,190 | 111.9 | 5,089 | 1.84 | 100% GPU |
+| `qwen3-coder:30b` | 9b | 45,200 | 35.8 | 879 | 23.99 | **71% GPU** |
+
+`qwen3-coder:30b` at `num_ctx` 65536 peaks at 31,195 MiB of 32,760 and the
+engine offloads 29% of it to CPU: output throughput drops to a quarter and
+prompt processing to an eighth, with a 24-second time to first token. On this
+host, 40,000-token documents are a `gpt-oss:20b` job.
+
+### glm-4.7-flash needs three times the output budget, not a better memory
+
+glm's 0.56 at ~17,000 tokens looked like a long-context collapse. It is mostly
+a budget artifact. Every one of its seven failures was `done_reason=length`
+with an empty answer and 13,900-22,000 characters of thinking. Re-running the
+five failing tasks with `--max-tokens 12288` (3x the task budgets, same
+documents, same `num_ctx`) recovered four of them:
+
+| Task | 9a (4096-5120 budget) | diagnostic (12288) |
+|---|---|---|
+| `resolve_supersession` | 1.00 | 1.00 |
+| `sum_scattered` | 1.00 | 1.00 |
+| `absent_fact` | 0.50 | **1.00** (3,799 output tokens) |
+| `embedded_instruction_deep` | 0.00 | **1.00** (7,234 output tokens) |
+| `multi_hop_chain` | 0.00 | 0.00 (12,288 exhausted, 49,184 chars of thinking) |
+
+So glm is a model whose reasoning scales with document length faster than its
+answer arrives, and one task where it genuinely never terminates. Judged at a
+budget it can use, its long-context retrieval is sound. Judged at the budget
+every other model finishes comfortably inside, it scores 0.56. Both statements
+are true and the second is the one that matters operationally: it costs full
+price and returns nothing.
+
+This diagnostic was run with `--force`, because the fit guard's generic
+estimate of 1.3 prompt tokens per filler token is too pessimistic for glm's
+tokenizer (measured: 1.051), and `num_ctx` was held at 9a's 32768 so the two
+runs stay comparable.
 
 ### A validator correction
 
@@ -175,8 +258,10 @@ So on this GPU: `qwen3-coder:30b` is safe up to 32k and should not be run at
 64k; `gpt-oss:20b` is the long-context choice.
 
 Quality stayed 1.00 at every context length for both models, including the
-offloaded case — more evidence that the long-context tasks are too easy rather
-than that offloading is harmless to quality.
+offloaded case. Note what that does and does not say: a larger *window* costs
+nothing in quality, and stages 9a and 9b then showed that a larger *document*
+does. Window size and document size are different variables and only the
+second one degraded these models.
 
 ## Recommendations
 
@@ -189,7 +274,7 @@ report under *Recommendations by workload*.
 | Fast interactive | `qwen3-coder:30b` | best speed and latency with instruction-following 0.69 |
 | Highest quality | `qwen3.8:27b` | top or joint-top in all six categories, including instruction 0.94; costs half the speed |
 | Reasoning | `gpt-oss:20b` or `qwen3.8:27b` | both 1.00; `gpt-oss` is 1.6× faster, `qwen3.8` follows instructions far better |
-| Long-context analysis | `gpt-oss:20b` | the only model measured to hold full GPU residency and flat throughput at 64k |
+| Long-context analysis | `gpt-oss:20b` | the only model to hold full GPU residency at 64k; at ~40,000-token documents `qwen3-coder:30b` offloads 29% and drops to 35.8 tok/s. Both score 0.88 there, failing the same ordering task |
 | Lightweight / multi-agent worker | `gpt-oss:20b` | tool use and agent both 1.00 at the smallest footprint (12.85 GiB, 13.5 GiB resident) |
 | Vision | not yet benchmarked | `qwen3.5:35b` and `qwen3.8:27b` report vision capability; the suite has no vision tasks |
 
